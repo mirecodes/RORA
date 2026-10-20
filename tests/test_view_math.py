@@ -1,5 +1,6 @@
 import numpy as np
 
+from functions.gui.gizmo import axis_drag_distance, ring_drag_angle
 from functions.gui.viewcube import piece_at, slerp, view_for
 
 
@@ -26,6 +27,21 @@ def test_slerp_endpoints_and_antipodes():
     mid = slerp(a, -a, 0.5)
     assert np.isclose(np.linalg.norm(mid), 1.0) and abs(np.dot(mid, a)) < 1e-6
     assert np.allclose(slerp(a, -a, 1.0), -a)
+
+
+def test_axis_drag_distance():
+    # axis drawn 100 px to the right for a world segment of length 2
+    assert np.isclose(axis_drag_distance([50, 0], [0, 0], [100, 0], 2.0), 1.0)
+    assert np.isclose(axis_drag_distance([0, 40], [0, 0], [100, 0], 2.0), 0.0)
+    assert np.isclose(axis_drag_distance([-25, 10], [0, 0], [100, 0], 2.0), -0.5)
+    assert axis_drag_distance([10, 10], [5, 5], [5, 5], 1.0) == 0.0  # axis points at the camera
+
+
+def test_ring_drag_angle():
+    c = np.array([0.0, 0.0])
+    assert np.isclose(ring_drag_angle([10, 0], [0, 10], c), 90.0)
+    assert np.isclose(ring_drag_angle([0, 10], [10, 0], c), -90.0)
+    assert ring_drag_angle([1, 0], [0, 10], c) == 0.0  # too close to the center
 
 
 if __name__ == "__main__":
