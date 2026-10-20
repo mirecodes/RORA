@@ -1,10 +1,14 @@
 """Side panel widgets: git-log style stage timeline, interaction host, parameter editor, and log."""
-from PySide6.QtCore import QPoint, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPen
-from PySide6.QtWidgets import (QCheckBox, QHBoxLayout, QLabel, QPlainTextEdit, QToolButton, QVBoxLayout,
-                               QWidget)
+import copy
+
+import yaml
+from PySide6.QtCore import QPoint, QRegularExpression, Qt, Signal
+from PySide6.QtGui import QColor, QDoubleValidator, QPainter, QPen, QRegularExpressionValidator
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit,
+                               QPushButton, QScrollArea, QSpinBox, QToolButton, QVBoxLayout, QWidget)
 
 from functions.gui import theme as th
+from functions.gui.params_io import STAGE_SECTIONS, field_kind
 from functions.gui.runner import STAGE_LABELS, STAGE_ORDER
 from functions.gui.scenes import section
 
@@ -318,3 +322,285 @@ class LogView(QWidget):
         self.text.setVisible(on)
         self.last.setVisible(not on)
         self.toggle.setText("LOG ▾" if on else "LOG ▸")
+
+
+SECTION_FOR_STAGE = {"align": "transform", "refine": "refine", "decompose": "decompose",
+                     "segment": "segment", "articulate": "articulate", "bind": "bind"}
+SECTION_TITLES = {"object": "Object", "pipeline": "Pipeline · run settings (not saved)", "transform": "Align",
+                  "refine": "Refine", "decompose": "Decompose", "segment": "Segment",
+                  "articulate": "Articulate", "bind": "Bind", "visualization": "Visualization"}
+RELOAD_KEYS = {"object_name", "profile", "object_profile"}   # editing these reloads the parameters
+NONE_PROFILE = "(none)"
+
+
+def _parse_null(text: str):
+    """Empty -> None; otherwise the YAML value of the text (so `0.5` becomes a float)."""
+    return None if not text.strip() else yaml.safe_load(text)
+
+
+class Collapsible(QWidget):
+    """Header button + body; the header shows ● when anything inside was edited."""
+
+    def __init__(self, title: str, level: int = 0):
+        super().__init__()
+        self.title = title
+        self.modified = False
+        self.head = QToolButton()
+        self.head.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.head.clicked.connect(self._toggle)
+        self.body = QWidget()
+        self.body_layout = QVBoxLayout(self.body)
+        self.body_layout.setContentsMargins(12 if level else 4, 2, 0, 4)
+        self.body_layout.setSpacing(3)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(self.head, alignment=Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(self.body)
+        self.set_expanded(False)
+
+    def _toggle(self) -> None:
+        self.set_expanded(self.body.isHidden())
+
+    def set_expanded(self, on: bool) -> None:
+        self.body.setVisible(on)
+        self._update_head()
+
+    def set_modified(self, on: bool) -> None:
+        self.modified = on
+        self._update_head()
+
+    def _update_head(self) -> None:
+        arrow = "▸" if self.body.isHidden() else "▾"
+        self.head.setText(f"{arrow} {self.title}{'  ●' if self.modified else ''}")
+
+
+class ParamEditor(QWidget):
+    """Form generated from the yml values: one collapsible section per stage, widgets by value kind.
+    Edits change an in-memory copy; the window snapshots it for the next stage start."""
+    changed = Signal()
+    object_changed = Signal(dict)
+    save_requested = Signal()
+
+    def __init__(self):
+        super().__init__()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 10, 12, 6)
+        layout.setSpacing(6)
+        head = QHBoxLayout()
+        head.addWidget(section("Parameters"))
+        self.badge = _label("", "Modified")
+        head.addStretch()
+        head.addWidget(self.badge)
+        layout.addLayout(head)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        layout.addWidget(self.scroll, 1)
+        self.note = _label("Edits apply to the next stage that starts.", "Muted")
+        self.note.setVisible(False)
+        layout.addWidget(self.note)
+        buttons = QHBoxLayout()
+        self.revert_btn = QPushButton("Revert")
+        self.save_btn = QPushButton("Save object profile")
+        for b in (self.revert_btn, self.save_btn):
+            b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.revert_btn.clicked.connect(self.revert)
+        self.save_btn.clicked.connect(self.save_requested)
+        buttons.addWidget(self.revert_btn)
+        buttons.addStretch()
+        buttons.addWidget(self.save_btn)
+        layout.addLayout(buttons)
+        self.obj, self.params, self._orig = {}, {}, ({}, {})
+        self.comments, self.profiles = {}, []
+        self.widgets: dict[tuple, QWidget] = {}
+        self.sections: dict[str, Collapsible] = {}
+        self._meta: dict[QWidget, tuple] = {}   # field widget -> (root, path, kind)
+
+    # --- data ---
+    def load(self, obj: dict, params: dict, comments: dict, profiles: list[str]) -> None:
+        self.obj, self.params = copy.deepcopy(obj), copy.deepcopy(params)
+        self._orig = (copy.deepcopy(obj), copy.deepcopy(params))
+        self.comments, self.profiles = comments, profiles
+        self._build()
+
+    def values(self) -> tuple[dict, dict]:
+        return copy.deepcopy(self.obj), copy.deepcopy(self.params)
+
+    def modified(self) -> bool:
+        return (self.obj, self.params) != self._orig
+
+    def revert(self) -> None:
+        self.load(*self._orig, self.comments, self.profiles)
+        self.changed.emit()
+
+    def after_save(self, obj: dict, profiles: list[str]) -> None:
+        self.load(obj, self.params, self.comments, profiles)
+
+    def set_stage_enabled(self, stage: str, on: bool) -> None:
+        self.params["pipeline"]["stages"][stage] = bool(on)
+        self._mark()
+        self.changed.emit()
+
+    def set_busy(self, busy: bool) -> None:
+        """While a run is active, object edits (which reload everything) are locked."""
+        if "object" in self.sections:
+            self.sections["object"].body.setEnabled(not busy)
+        self.save_btn.setEnabled(not busy)
+        self.revert_btn.setEnabled(not busy)
+        self.note.setVisible(busy)
+
+    def show_stage(self, stage: str) -> None:
+        key = SECTION_FOR_STAGE.get(stage)
+        for name, sec in self.sections.items():
+            sec.set_expanded(name == key)
+        if key in self.sections:
+            self.scroll.ensureWidgetVisible(self.sections[key])
+
+    # --- building ---
+    def _build(self) -> None:
+        self.widgets, self.sections, self._meta = {}, {}, {}
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(0, 0, 4, 0)
+        layout.setSpacing(4)
+
+        obj_sec = self._section("object", layout)
+        for key in ("object_name", "extension", "profile"):
+            self._field(obj_sec, "obj", (key,), self.obj.get(key), self.comments.get(("object", key), ""))
+        combo = QComboBox()
+        combo.addItems([NONE_PROFILE] + self.profiles)
+        combo.setCurrentText(self.obj.get("object_profile") or NONE_PROFILE)
+        combo.currentTextChanged.connect(self._on_profile)
+        self._row(obj_sec, "object_profile", combo)
+        self.widgets[("obj", "object_profile")] = combo
+
+        pipe_sec = self._section("pipeline", layout)
+        for key, value in self.params.get("pipeline", {}).items():
+            if key != "stages":  # stage switches are the timeline checkboxes
+                self._add(pipe_sec, "params", ("pipeline", key), value, 1)
+        for name in STAGE_SECTIONS:
+            if name not in self.params:
+                continue
+            sec = self._section(name, layout)
+            if name == "segment":
+                self._field(sec, "obj", ("parts", "num"), self.obj.get("parts", {}).get("num"), "")
+            for key, value in self.params[name].items():
+                self._add(sec, "params", (name, key), value, 1)
+        layout.addStretch()
+        self.scroll.setWidget(content)
+        self._mark()
+
+    def _section(self, name: str, layout) -> Collapsible:
+        sec = Collapsible(SECTION_TITLES.get(name, name))
+        self.sections[name] = sec
+        layout.addWidget(sec)
+        return sec
+
+    def _add(self, parent: Collapsible, root: str, path: tuple, value, level: int) -> None:
+        if isinstance(value, dict):
+            group = Collapsible(path[-1], level)
+            parent.body_layout.addWidget(group)
+            for key, sub in value.items():
+                self._add(group, root, path + (key,), sub, level + 1)
+        else:
+            self._field(parent, root, path, value, self.comments.get(path, ""))
+
+    def _row(self, parent: Collapsible, name: str, widget: QWidget) -> None:
+        row = QHBoxLayout()
+        label = _label(name)
+        label.setToolTip(name)
+        label.setMinimumWidth(10)
+        row.addWidget(label, 1)
+        widget.setFixedWidth(118)
+        row.addWidget(widget)
+        parent.body_layout.addLayout(row)
+
+    def _field(self, parent: Collapsible, root: str, path: tuple, value, comment: str) -> None:
+        kind, choices = field_kind(value, comment)
+        if kind == "bool":
+            w = QCheckBox()
+            w.setChecked(bool(value))
+            w.toggled.connect(self._on_field)
+        elif kind == "int":
+            w = QSpinBox()
+            w.setRange(-10 ** 9, 10 ** 9)
+            w.setValue(int(value))
+            w.setKeyboardTracking(False)
+            w.valueChanged.connect(self._on_field)
+        elif kind == "choice":
+            w = QComboBox()
+            w.addItems(choices)
+            w.setCurrentText(str(value))
+            w.currentTextChanged.connect(self._on_field)
+        else:
+            w = QLineEdit("" if value is None else str(value))
+            if kind == "float":
+                w.setValidator(QDoubleValidator())
+            elif kind == "percent":
+                w.setValidator(QRegularExpressionValidator(QRegularExpression(r"^-?\d+(\.\d+)?%$")))
+            elif kind == "null":
+                w.setPlaceholderText("null")
+            w.editingFinished.connect(self._on_field)
+        w.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        if comment:
+            w.setToolTip(comment.lstrip("# "))
+        self._meta[w] = (root, path, kind)
+        self.widgets[(root,) + path] = w
+        self._row(parent, path[-1], w)
+
+    # --- edits (bound-method slots; the sender identifies the field) ---
+    def _on_field(self, *_) -> None:
+        w = self.sender()
+        root, path, kind = self._meta[w]
+        if kind == "bool":
+            value = w.isChecked()
+        elif kind == "int":
+            value = int(w.value())
+        elif kind == "choice":
+            value = w.currentText()
+        else:
+            current = self._get(root, path)
+            if w.validator() is not None and not w.hasAcceptableInput():
+                w.setText("" if current is None else str(current))  # reject invalid text
+                return
+            try:
+                value = {"float": float, "null": _parse_null}.get(kind, str)(w.text())
+            except (ValueError, yaml.YAMLError):
+                w.setText("" if current is None else str(current))
+                return
+        self._set(root, path, value)
+
+    def _on_profile(self, text: str) -> None:
+        self._set("obj", ("object_profile",), "" if text == NONE_PROFILE else text)
+
+    def _get(self, root: str, path: tuple):
+        node = self.obj if root == "obj" else self.params
+        for key in path:
+            node = node[key]
+        return node
+
+    def _set(self, root: str, path: tuple, value) -> None:
+        node = self.obj if root == "obj" else self.params
+        for key in path[:-1]:
+            node = node.setdefault(key, {})
+        old = node.get(path[-1])
+        if old == value and type(old) is type(value):
+            return
+        node[path[-1]] = value
+        self._mark()
+        if root == "obj" and path[0] in RELOAD_KEYS:
+            self.object_changed.emit(copy.deepcopy(self.obj))
+        else:
+            self.changed.emit()
+
+    def _mark(self) -> None:
+        orig_obj, orig_params = self._orig
+        for name, sec in self.sections.items():
+            if name == "object":
+                sec.set_modified(self.obj != orig_obj)
+            elif name == "segment":
+                sec.set_modified(self.params.get(name) != orig_params.get(name)
+                                 or self.obj.get("parts") != orig_obj.get("parts"))
+            else:
+                sec.set_modified(self.params.get(name) != orig_params.get(name))
+        self.badge.setText("● modified" if self.modified() else "")

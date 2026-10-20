@@ -5,7 +5,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
 from functions.gui.panel import InteractionHost, LogView, Timeline  # noqa: E402
+from functions.gui.panel import ParamEditor  # noqa: E402
+from functions.gui.params_io import load_comments  # noqa: E402
 from functions.gui.runner import STAGE_ORDER  # noqa: E402
+from functions.utils.config import load_object, load_params  # noqa: E402
 
 app = QApplication.instance() or QApplication([])
 
@@ -57,6 +60,47 @@ def test_interaction_host_and_log():
     assert log.last.text() == "[info] two"
     log.append("partial")
     assert log.last.text() == "partial"
+
+
+def make_editor():
+    editor = ParamEditor()
+    editor.load(load_object(""), load_params(object_profile=""), load_comments(), ["toy_20261020_143012"])
+    return editor
+
+
+def test_editor_edits_values_and_marks_modified():
+    editor = make_editor()
+    changed = []
+    editor.changed.connect(lambda: changed.append(1))
+    box = editor.widgets[("params", "decompose", "coacd", "threshold")]
+    box.setText("0.2")
+    box.editingFinished.emit()
+    obj, params = editor.values()
+    assert params["decompose"]["coacd"]["threshold"] == 0.2 and changed and editor.modified()
+    assert editor.sections["decompose"].modified
+    editor.revert()
+    assert not editor.modified()
+    assert editor.values()[1]["decompose"]["coacd"]["threshold"] != 0.2
+
+
+def test_editor_kinds_and_object_reload_signal():
+    editor = make_editor()
+    assert type(editor.widgets[("params", "refine", "method")]).__name__ == "QComboBox"
+    assert type(editor.widgets[("params", "transform", "use_auto_alignment")]).__name__ == "QCheckBox"
+    pct = editor.widgets[("params", "refine", "pymeshlab", "params", "meshing_isotropic_explicit_remeshing",
+                          "targetlen")]
+    pct.setText("abc")
+    pct.editingFinished.emit()
+    assert editor.values()[1]["refine"]["pymeshlab"]["params"]["meshing_isotropic_explicit_remeshing"][
+        "targetlen"] == "1%"  # invalid text is rejected
+    reloads = []
+    editor.object_changed.connect(reloads.append)
+    combo = editor.widgets[("obj", "object_profile")]
+    combo.setCurrentIndex(combo.findText("toy_20261020_143012"))
+    assert reloads and reloads[-1]["object_profile"] == "toy_20261020_143012"
+    assert ("obj", "parts", "num") in editor.widgets  # parts.num lives in the Segment section
+    editor.set_stage_enabled("bind", False)
+    assert editor.values()[1]["pipeline"]["stages"]["bind"] is False
 
 
 if __name__ == "__main__":
