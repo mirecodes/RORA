@@ -9,8 +9,8 @@ import trimesh
 import vedo
 
 from json_handler import JsonHandler
-from functions.estimate import learn_separator_main, _trimesh_list_to_vedo_mesh
-from functions.graphs import cluster_reciprocal_loop_pairs, classify_vertices, build_adjacency_graph
+from functions.legacy.estimate import learn_separator_main, _trimesh_list_to_vedo_mesh
+from functions.legacy.graphs import cluster_reciprocal_loop_pairs, classify_vertices, build_adjacency_graph
 from functions.lib.visualization import PASTEL_RGB_FLOAT, visualize_and_select_vectors_for_rlps, visualize_rlp_clustering
 
 

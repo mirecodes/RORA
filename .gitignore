@@ -4,14 +4,12 @@
 # IDE
 .idea/
 
-# Working Directory
+# Data / intermediates / outputs
 data/
-work/
-out/
-urdf/
+working/
+export/
 
 # Python
 __pycache__/
 *.pyc
-
-scripts/dev/urdf/
+.venv/

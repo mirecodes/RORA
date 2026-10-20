@@ -4,8 +4,8 @@ import os
 import numpy as np
 from plyfile import PlyData
 
-from functions.urdf_parser import URDFParser  # ← 별도 파일
-from functions.transform import _closest_rotation, save_gaussian_with_transform  # 수정하세요
+from functions.render.urdf_parser import URDFParser  # ← 별도 파일
+from functions.stages.transform import _closest_rotation, save_gaussian_with_transform
 
 
 
@@ -285,7 +285,8 @@ def render_gaussians_parent_to_child(cfg: RenderConfig) -> Dict[str, str]:
 # --------------------- example ---------------------
 if __name__ == "__main__":
     import os
-    object_path = os.path.abspath("../out/grinder/")  # 수정
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    object_path = os.path.join(project_root, "export", "grinder")  # 수정
     cfg = RenderConfig(
         urdf_path=os.path.join(object_path, "urdf", "object.urdf"),
         mesh_root=os.path.join(object_path, "urdf", "meshes"),

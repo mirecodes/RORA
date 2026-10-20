@@ -155,7 +155,7 @@ if __name__ == "__main__":
     with open(config_path, 'r') as f:
         full_config = yaml.safe_load(f)
 
-    base_path = os.getcwd()
+    base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
     for object_name in cfg.object_names:
         print(f"\n{'='*50}")
@@ -171,7 +171,7 @@ if __name__ == "__main__":
 
         urdf_path = obj_config.get("urdf_path")
         joint_cfg = obj_config.get("joint_config") or {}
-        output_dir = obj_config.get("output_dir", "../merged")
+        output_dir = obj_config.get("output_dir", "export/merged")
 
         # Resolve paths
         if not os.path.isabs(urdf_path):

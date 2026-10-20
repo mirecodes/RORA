@@ -76,15 +76,15 @@ def translate_ply(input_path: str, output_path: str, offset: tuple):
 # --- 메인 실행 부분 ---
 if __name__ == "__main__":
 
-    base_dir = os.getcwd()
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # functions/
 
     # --- 여기를 수정하세요 ---
 
     # 1. 원본 .ply 파일 경로
-    input_file = os.path.abspath(os.path.join(base_dir, "..", "out", "transfer", "spray_gaussian_6.ply"))
+    input_file = os.path.abspath(os.path.join(base_dir, "..", "export", "transfer", "spray_gaussian_6.ply"))
 
     # 2. 결과물을 저장할 .ply 파일 경로
-    output_file = os.path.abspath(os.path.join(base_dir, "..", "out", "shifted_meshes", "shifted_spray_gaussian_6.ply"))
+    output_file = os.path.abspath(os.path.join(base_dir, "..", "export", "shifted_meshes", "shifted_spray_gaussian_6.ply"))
 
     # 3. 이동시킬 기준 좌표 (오프셋 벡터)
     offset_vector = (0.639987, 1.448243, 1.526706)

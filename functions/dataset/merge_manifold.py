@@ -144,10 +144,10 @@ if __name__ == "__main__":
     
     urdf_path = obj_config.get("urdf_path")
     joint_cfg = obj_config.get("joint_config", {})
-    output_dir = obj_config.get("output_dir", "../merged")
+    output_dir = obj_config.get("output_dir", "export/merged")
 
     # Resolve paths
-    base_path = os.getcwd()
+    base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     if not os.path.isabs(urdf_path):
         urdf_path = os.path.join(base_path, urdf_path)
     

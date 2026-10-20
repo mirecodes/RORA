@@ -10,7 +10,7 @@ from functions.lib.graph import (
     build_adjacency_graph, filter_boundary_vertices, segregate_loops, 
     filter_proximal_vertices, identify_loop_neighbor, merge_loops_by_topology, extract_boundary_loops_robust
 )
-from functions.lib.visualization import visualize_k_hop_plane, visualize_all_boundary_loops
+from functions.lib.visualization import visualize_k_hop_plane, visualize_all_boundary_loops, PASTEL_RGB_UINT8
 
 # -----------------------------------------------------------------------------
 # Trainers: single-plane SVM and polyhedral (multi-plane) classifier
@@ -464,6 +464,11 @@ def learn_separator_main(
         
         # (G) Visualize results if requested
         if visualize_results:
+            target_part = freq_prox_nbrs[0] if (freq_prox_nbrs and isinstance(freq_prox_nbrs[0], int)) else idx_part
+            num_pastel = len(PASTEL_RGB_UINT8)
+            target_color_rgb = tuple(PASTEL_RGB_UINT8[(target_part - 1) % num_pastel])
+            loop_color_str = '#%02x%02x%02x' % target_color_rgb
+
             for method_name in methods_to_run:
                 result_data = result_linear if method_name=="linear" else result_rbf if method_name=="rbf" else result_polyhedral
                 if result_data and result_data.get("plane"):
@@ -474,10 +479,11 @@ def learn_separator_main(
                         idx_neg=np.unique(idx_neg),
                         planes=result_data["plane"],
                         center=center,
-                        title=f"Loop {order}, Method: {method_name}",
+                        title=f"Loop {order+1}, Method: {method_name}",
                         display=visualize_results,
                         loop_indices=loop_idx,
-                        parent_part=idx_part
+                        parent_part=idx_part,
+                        loop_color=loop_color_str,
                     )
 
         # Duplicate result for each identified neighbor

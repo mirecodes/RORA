@@ -1,11 +1,12 @@
 {
-  "object_name": "proto_toolbox", 
+  "object_name": "apr_diffuser", 
   "extension": "ply",
   "parts": {
-    "num": 5      
+    "num": 3
   },
   "vector_scale": {
-    "length_factor": 0.5,
-    "thickness_factor": 0.5
-  }
+    "length_factor": 1.0,
+    "thickness_factor": 1.0
+  },
+  "refinement_method": "pymeshlab"
 }

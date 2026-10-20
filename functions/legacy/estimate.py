@@ -8,7 +8,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.svm import LinearSVC, SVC
 from sklearn.cluster import KMeans
 
-from functions.graphs import build_adjacency_graph, classify_vertices, filter_proximal_vertices, \
+from functions.legacy.graphs import build_adjacency_graph, classify_vertices, filter_proximal_vertices, \
     filter_boundary_vertices, segregate_loops
 
 
@@ -605,11 +605,12 @@ def visualize_k_hop_plane(
         neg_pts = vedo.Spheres(verts[idx_neg], r=0.005, c="salmon", res=8).alpha(0.6)
         actors.append(neg_pts)
 
-    # 3) Estimated plane(s)
-    plane_colors = ["green", "cyan", "magenta", "yellow"]
+    # 3) Estimated plane(s) - subtle gray colors so multiple planes (e.g. polyhedral) can be distinguished
+    poly_plane_colors = ["#9EAEC4", "#C4AE9E", "#9EC4AF", "#C49EC1"]
     for i, (n, d) in enumerate(planes):
         plane_pos = center - (np.dot(center, n) + d) * n
-        plane_actor = vedo.Plane(pos=plane_pos, normal=n, s=(1.0, 1.0)).c(plane_colors[i % len(plane_colors)]).alpha(0.5)
+        c_plane = poly_plane_colors[i % len(poly_plane_colors)] if len(planes) > 1 else "#B3B3B3"
+        plane_actor = vedo.Plane(pos=plane_pos, normal=n, s=(1.0, 1.0)).c(c_plane).alpha(0.25)
         actors.append(plane_actor)
 
     # 4) Show plot

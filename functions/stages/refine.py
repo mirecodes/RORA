@@ -131,6 +131,81 @@ def debug_show_mesh(ms: pymeshlab.MeshSet, title: str):
 
 
 def stage_refine(cfgs, debug_mode: bool = False):
+    refinement_method = getattr(cfgs, "refinement_method", "pymeshlab")
+    print(f"[info]: Refinement stage using method: '{refinement_method}'")
+
+    if refinement_method == "point2mesh":
+        run_point2mesh_refinement(cfgs, debug_mode=debug_mode)
+    elif refinement_method == "pymeshlab_then_point2mesh":
+        print("[info]: Step 1/2 - Running PyMeshLab Refinement...")
+        run_pymeshlab_refinement(cfgs, debug_mode=debug_mode)
+        states = JsonHandler(cfgs.json_states_dir, auto_save=False)
+        pymeshlab_refined_mesh = states.refine.dirs.mesh
+        print(f"[info]: Step 2/2 - Running Point2Mesh Refinement on PyMeshLab result ({pymeshlab_refined_mesh})...")
+        run_point2mesh_refinement(cfgs, input_mesh_path=pymeshlab_refined_mesh, debug_mode=debug_mode)
+    else:
+        run_pymeshlab_refinement(cfgs, debug_mode=debug_mode)
+
+
+def run_point2mesh_refinement(cfgs, input_mesh_path: str = None, debug_mode: bool = False):
+    states = JsonHandler(cfgs.json_states_dir, auto_save=False)
+    raw_mesh_in = input_mesh_path if input_mesh_path else states.transform.dirs.mesh
+    mesh_in_dir = os.path.abspath(raw_mesh_in)
+
+    # Base directory for point2mesh
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    p2m_dir = os.path.join(project_root, "submodules", "point2mesh")
+    p2m_venv_python = os.path.join(p2m_dir, ".venv", "bin", "python")
+
+    if not os.path.exists(p2m_venv_python):
+        # Fallback to system/current python if .venv python is missing
+        p2m_venv_python = "python"
+
+    mesh_out_dir = os.path.abspath(os.path.join(cfgs.mesh_working_dir, f"refined_mesh.{cfgs.extension}"))
+    save_dir = os.path.abspath(os.path.join(cfgs.mesh_working_dir, "point2mesh_out"))
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Point2Mesh execution command
+    cmd = [
+        p2m_venv_python,
+        os.path.join(p2m_dir, "main.py"),
+        "--input-pc", mesh_in_dir,
+        "--initial-mesh", mesh_in_dir,
+        "--save-path", save_dir,
+        "--iterations", str(getattr(cfgs, "point2mesh_iterations", 10)),
+        "--gpu", "-1"
+    ]
+
+    print(f"[point2mesh]: Running command: {' '.join(cmd)}")
+    import subprocess
+    result = subprocess.run(cmd, cwd=p2m_dir, capture_output=True, text=True)
+
+    if result.returncode != 0:
+        print(f"[point2mesh warning]: point2mesh failed with stdout:\n{result.stdout}\nstderr:\n{result.stderr}")
+        print("[point2mesh warning]: Falling back to PyMeshLab refinement.")
+        run_pymeshlab_refinement(cfgs, debug_mode=debug_mode)
+        return
+
+    # Check output mesh
+    recon_obj = os.path.join(save_dir, "last_recon.obj")
+    if os.path.exists(recon_obj):
+        # Convert OBJ output to target extension (e.g., PLY) using pymeshlab
+        ms = pymeshlab.MeshSet()
+        ms.load_new_mesh(recon_obj)
+        ms.save_current_mesh(mesh_out_dir)
+        ms.clear()
+        print(f"[point2mesh]: Successfully generated refined mesh at {mesh_out_dir}")
+    else:
+        print(f"[point2mesh warning]: {recon_obj} not found. Falling back to PyMeshLab.")
+        run_pymeshlab_refinement(cfgs, debug_mode=debug_mode)
+        return
+
+    states = JsonHandler(cfgs.json_states_dir, auto_save=True)
+    states.refine = {}
+    states.refine.dirs = {"mesh": mesh_out_dir}
+
+
+def run_pymeshlab_refinement(cfgs, debug_mode: bool = False):
     # Load configurations
     refCfgs = RefinementConfig()
     states = JsonHandler(cfgs.json_states_dir, auto_save=False)
@@ -236,3 +311,4 @@ def stage_refine(cfgs, debug_mode: bool = False):
         pass
 
     return
+

@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 # Add project root to python path to resolve local packages
-project_root = str(Path(__file__).resolve().parent.parent)
+project_root = str(Path(__file__).resolve().parents[2])
 if project_root not in sys.path:
     sys.path.append(project_root)
 
@@ -26,10 +26,10 @@ class SystemConfigs():
     json_config_path = os.path.join(os.path.dirname(__file__), "configs.json")
 
     # Operational controller
-    enable_stage_align: bool = False
+    enable_stage_align: bool = True
     restore_align: bool = False
-    enable_stage_refine: bool = False
-    enable_stage_decompose: bool = False
+    enable_stage_refine: bool = True
+    enable_stage_decompose: bool = True
     enable_stage_segment: bool = True
     enable_stage_articulate: bool = True
     enable_stage_bind: bool = True
@@ -53,23 +53,23 @@ class SystemConfigs():
     object_name = json_cfgs.object_name
     extension = json_cfgs.extension
 
-    in_path = f"data/{object_name}/"
-    out_path = f"out/{object_name}/"
-    working_path = f"work/{object_name}/"
+    in_path = f"data/objects/{object_name}/"
+    out_path = f"export/{object_name}/"
+    working_path = f"working/{object_name}/"
 
     fname_mesh = f"mesh.{extension}"
     fname_gaussian = f"gaussian.{extension}"
 
-    root_dir: str = field(default_factory=lambda: os.path.dirname(os.path.abspath(__file__)), init=False)
+    root_dir: str = field(default_factory=lambda: project_root, init=False)
     in_dir: str = field(init=False)
     out_dir: str = field(init=False)
     working_dir: str = field(init=False)
 
     def __post_init__(self):
         # Fundamental directories
-        self.in_dir = os.path.abspath(os.path.join(self.root_dir, "..", self.in_path))
-        self.out_dir = os.path.abspath(os.path.join(self.root_dir, "..", self.out_path))
-        self.working_dir = os.path.abspath(os.path.join(self.root_dir, "..", self.working_path))
+        self.in_dir = os.path.abspath(os.path.join(self.root_dir, self.in_path))
+        self.out_dir = os.path.abspath(os.path.join(self.root_dir, self.out_path))
+        self.working_dir = os.path.abspath(os.path.join(self.root_dir, self.working_path))
 
         # Functional directories
         self.json_attr_dir = os.path.join(self.working_dir, "attributes")

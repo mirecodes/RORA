@@ -48,14 +48,14 @@ def get_vector_scale_factors(length_factor: float | None = None, thickness_facto
         return float(length_factor), float(thickness_factor)
 
     possible_paths = [
-        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "scripts", "configs.json")),
-        os.path.abspath(os.path.join(os.getcwd(), "scripts", "configs.json")),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "pipeline", "configs.json")),
+        os.path.abspath(os.path.join(os.getcwd(), "functions", "pipeline", "configs.json")),
         os.path.abspath(os.path.join(os.getcwd(), "configs.json")),
     ]
 
     try:
         import glob
-        work_cfgs = glob.glob(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "work", "*", "attributes", "configs.json")))
+        work_cfgs = glob.glob(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "working", "*", "attributes", "configs.json")))
         possible_paths.extend(work_cfgs)
     except Exception:
         pass
@@ -220,8 +220,8 @@ def select_parts_interactive(parts: List[trimesh.Trimesh], verts: np.ndarray, fa
 # =============================================================================
 # Vector selection (per-RLP)
 # =============================================================================
-def on_vector_click(event, *, vec_actors, rlp, click_counter):
-    """Toggle None → Revolute → Prismatic → None for cylinder Tube vectors."""
+def on_vector_click(event, *, vec_actors, rlp, click_counter, plt_rlp, idx2actor, arrow_len, shaft_rad, head_rad, head_len):
+    """Toggle None → Revolute → Prismatic → None for Arrow vectors by rebuilding actor."""
     act = getattr(event, "actor", None)
     if act is None or act not in vec_actors:
         return
@@ -230,44 +230,77 @@ def on_vector_click(event, *, vec_actors, rlp, click_counter):
     v_idx = getattr(act, "v_idx_in_rlp", getattr(act, "vec_idx", None))
 
     if st == "None":
-        act.c("yellow").alpha(1.0)
-        setattr(act, "vec_state", "Revolute")
+        next_st = "Revolute"
         if rlp_dict and 'vectors' in rlp_dict and v_idx is not None and v_idx < len(rlp_dict['vectors']):
             click_counter['count'] = int(click_counter.get('count', 0)) + 1
             rlp_dict['vectors'][v_idx]['state'] = "Revolute"
             rlp_dict['vectors'][v_idx]['order'] = int(click_counter['count'])
     elif st == "Revolute":
-        act.c("blue").alpha(1.0)
-        setattr(act, "vec_state", "Prismatic")
+        next_st = "Prismatic"
         if rlp_dict and 'vectors' in rlp_dict and v_idx is not None and v_idx < len(rlp_dict['vectors']):
             rlp_dict['vectors'][v_idx]['state'] = "Prismatic"
     else:
-        act.c("gray").alpha(0.85)
-        setattr(act, "vec_state", "None")
+        next_st = "None"
         if rlp_dict and 'vectors' in rlp_dict and v_idx is not None and v_idx < len(rlp_dict['vectors']):
             rlp_dict['vectors'][v_idx]['state'] = "None"
             rlp_dict['vectors'][v_idx]['order'] = None
-    event.plotter.render() if hasattr(event, "plotter") else None
+
+    c = np.asarray([0.0, 0.0, 0.0], dtype=float)
+    n = np.asarray([0.0, 0.0, 1.0], dtype=float)
+    if rlp_dict and 'vectors' in rlp_dict and v_idx is not None and v_idx < len(rlp_dict['vectors']):
+        v_info = rlp_dict['vectors'][v_idx]
+        c = np.asarray(v_info.get("center", rlp_dict.get("center", [0, 0, 0])), dtype=float)
+        n = normalize(np.asarray(v_info.get("n", [0, 0, 1]), dtype=float))
+
+    target_plt = getattr(event, "plotter", plt_rlp)
+    rebuild_arrow_actor(
+        target_plt,
+        old_actor=act,
+        center=c,
+        n=n,
+        arrow_len=arrow_len,
+        shaft_rad=shaft_rad,
+        head_rad=head_rad,
+        head_len=head_len,
+        state=next_st,
+        vi=v_idx if v_idx is not None else 0,
+        vec_actors=vec_actors,
+        idx2actor=idx2actor
+    )
+    if hasattr(target_plt, "render"):
+        target_plt.render()
 
 
-def rebuild_tube_actor(plt,
+def rebuild_arrow_actor(plt,
                         *,
                         old_actor,
                         center: np.ndarray,
                         n: np.ndarray,
-                        seg_len: float,
-                        radius: float,
+                        arrow_len: float,
+                        shaft_rad: float,
+                        head_rad: float,
+                        head_len: float,
                         state: str,
                         vi: int,
                         vec_actors: list,
                         idx2actor: dict):
-    """Recreate Tube preserving exact seg_len and radius."""
-    p0 = np.asarray(center, dtype=float) - (seg_len * 0.5) * normalize(np.asarray(n, dtype=float))
-    p1 = np.asarray(center, dtype=float) + (seg_len * 0.5) * normalize(np.asarray(n, dtype=float))
-    tube_color = "yellow" if state == "Revolute" else "blue" if state == "Prismatic" else "gray"
-    tube_r = radius
-    new_actor = vedo.Tube([p0, p1], r=tube_r, cap=True).c(tube_color).lighting('off')
-    new_actor.alpha(1.0 if state in ("Revolute", "Prismatic") else 0.85)
+    """Recreate Arrow preserving state & parameters, making selected arrows larger to enclose gray candidates."""
+    c = np.asarray(center, dtype=float)
+    n_dir = normalize(np.asarray(n, dtype=float))
+    if state == "Revolute":
+        tube_color = (255, 255, 0)
+        s_rad, h_rad, h_len, al = shaft_rad * 1.3, head_rad * 1.3, head_len * 1.15, 1.0
+    elif state == "Prismatic":
+        tube_color = (0, 0, 255)
+        s_rad, h_rad, h_len, al = shaft_rad * 1.3, head_rad * 1.3, head_len * 1.15, 1.0
+    else:
+        tube_color = "gray"
+        s_rad, h_rad, h_len, al = shaft_rad * 0.7, head_rad * 0.7, head_len * 0.7, 0.45
+
+    new_actor = vedo.Arrow(c, c + arrow_len * n_dir, c=tube_color, shaft_radius=s_rad, head_radius=h_rad, head_length=h_len).lighting('off')
+    if hasattr(new_actor, "pickable"):
+        new_actor.pickable(True)
+    new_actor.alpha(al)
     setattr(new_actor, "vec_state", state)
     setattr(new_actor, "vec_idx", vi)
     setattr(new_actor, "rlp_dict", getattr(old_actor, "rlp_dict", None))
@@ -287,8 +320,10 @@ def on_rlp_key(event, *,
                vec_indices: List[int],
                idx2actor: dict,
                vec_actors: list,
-               seg_len: float,
-               radius: float,
+               arrow_len: float,
+               shaft_rad: float,
+               head_rad: float,
+               head_len: float,
                angle_step_deg: float = 3.0,
                trans_step: float = 1.0):
     """
@@ -351,19 +386,21 @@ def on_rlp_key(event, *,
             v["n"] = n2.tolist()
             did_anything = True
 
-        # update view (rebuild tube)
+        # update view (rebuild arrow)
         if did_anything and vi in idx2actor:
             actor = idx2actor[vi]
             c_now = np.asarray(v.get("center", rlp.get("center", [0,0,0])), dtype=float)
             n_now = normalize(np.asarray(v.get("n"), dtype=float)) if v.get("n") is not None else None
             if n_now is not None and np.isfinite(n_now).all() and np.linalg.norm(n_now) > 1e-12:
-                rebuild_tube_actor(
+                rebuild_arrow_actor(
                     plt,
                     old_actor=actor,
                     center=c_now,
                     n=n_now,
-                    seg_len=seg_len,
-                    radius=radius,
+                    arrow_len=arrow_len,
+                    shaft_rad=shaft_rad,
+                    head_rad=head_rad,
+                    head_len=head_len,
                     state=getattr(actor, "vec_state", v.get("state", "None")),
                     vi=vi,
                     vec_actors=vec_actors,
@@ -375,17 +412,17 @@ def on_rlp_key(event, *,
 
 
 def visualize_and_select_vectors_for_rlps(rlps: List[dict],
-                                          parts: List[trimesh.Trimesh],
-                                          categories: List[List[trimesh.Trimesh]],
-                                          verts: np.ndarray,
-                                          faces: np.ndarray,
-                                          vert_label: np.ndarray | None = None,
-                                          display: bool = True) -> None:
+                                           parts: List[trimesh.Trimesh],
+                                           categories: List[List[trimesh.Trimesh]],
+                                           verts: np.ndarray,
+                                           faces: np.ndarray,
+                                           vert_label: np.ndarray | None = None,
+                                           display: bool = True) -> None:
     """
     Joint selection stage per Part Pair (i, j):
       - Color FULL mesh area for Part i and Part j using vert_label in sequence pastel colors (alpha=0.4)
       - Display ALL RLP vectors (plus pair additional intersection vectors) for Pair (i, j) together
-      - Vectors rendered as slender cylinder Tubes (no arrow head, ~1/3 thickness)
+      - Vectors rendered as Arrow shapes (scaled slightly down) matching RLP display
       - Colors: Gray (None) -> Yellow (Revolute) -> Blue (Prismatic) -> Gray (None)
     """
     if not display or not rlps:
@@ -395,11 +432,8 @@ def visualize_and_select_vectors_for_rlps(rlps: List[dict],
 
     lf, tf = get_vector_scale_factors()
     scene_diag = float(np.linalg.norm(verts.max(axis=0) - verts.min(axis=0)))
-    arrow_len, shaft_rad, head_rad, head_len, radius_sphere = get_standard_arrow_params(verts, length_factor=lf, thickness_factor=tf)
-    seg_len = arrow_len
-    # Tube thickness scaled by thickness_factor
-    tube_r = (scene_diag * 0.007 if np.isfinite(scene_diag) and scene_diag > 0 else 0.010) * tf
-    radius = tube_r
+    # Slightly scale down arrow size for joint suggestion UI
+    arrow_len, shaft_rad, head_rad, head_len, radius_sphere = get_standard_arrow_params(verts, length_factor=lf * 0.8, thickness_factor=tf * 0.8)
     trans_step = scene_diag * 0.02 if np.isfinite(scene_diag) and scene_diag > 0 else 1.0
 
     # Group RLPs by unique part pair (p_idx, q_idx)
@@ -473,13 +507,20 @@ def visualize_and_select_vectors_for_rlps(rlps: List[dict],
                     continue
 
                 st = v.get("state", "None")
-                tube_color = "yellow" if st == "Revolute" else "blue" if st == "Prismatic" else "gray"
+                if st == "Revolute":
+                    tube_color = (255, 255, 0)
+                    s_rad, h_rad, h_len, al = shaft_rad * 1.3, head_rad * 1.3, head_len * 1.15, 1.0
+                elif st == "Prismatic":
+                    tube_color = (0, 0, 255)
+                    s_rad, h_rad, h_len, al = shaft_rad * 1.3, head_rad * 1.3, head_len * 1.15, 1.0
+                else:
+                    tube_color = "gray"
+                    s_rad, h_rad, h_len, al = shaft_rad * 0.7, head_rad * 0.7, head_len * 0.7, 0.45
 
-                p0 = c - (arrow_len * 0.5) * n
-                p1 = c + (arrow_len * 0.5) * n
-
-                a_actor = vedo.Tube([p0, p1], r=tube_r, cap=True).c(tube_color).lighting('off')
-                a_actor.alpha(1.0 if st in ("Revolute", "Prismatic") else 0.85)
+                a_actor = vedo.Arrow(c, c + arrow_len * n, c=tube_color, shaft_radius=s_rad, head_radius=h_rad, head_length=h_len).lighting('off')
+                if hasattr(a_actor, "pickable"):
+                    a_actor.pickable(True)
+                a_actor.alpha(al)
                 setattr(a_actor, "vec_state", st)
                 setattr(a_actor, "vec_idx", global_vi)
                 setattr(a_actor, "rlp_dict", rlp)
@@ -500,7 +541,18 @@ def visualize_and_select_vectors_for_rlps(rlps: List[dict],
         # mouse: toggle
         plt_rlp.add_callback(
             "LeftButtonPress",
-            partial(on_vector_click, vec_actors=vec_actors, rlp=group_rlps[0], click_counter={'count': 0})
+            partial(
+                on_vector_click,
+                vec_actors=vec_actors,
+                rlp=group_rlps[0],
+                click_counter={'count': 0},
+                plt_rlp=plt_rlp,
+                idx2actor=idx2actor,
+                arrow_len=arrow_len,
+                shaft_rad=shaft_rad,
+                head_rad=head_rad,
+                head_len=head_len
+            )
         )
 
         # keyboard: move/rotate
@@ -512,8 +564,10 @@ def visualize_and_select_vectors_for_rlps(rlps: List[dict],
             vec_indices=valid_indices,
             idx2actor=idx2actor,
             vec_actors=vec_actors,
-            seg_len=seg_len,
-            radius=radius,
+            arrow_len=arrow_len,
+            shaft_rad=shaft_rad,
+            head_rad=head_rad,
+            head_len=head_len,
             angle_step_deg=1.5,
             trans_step=trans_step
         )
@@ -521,9 +575,9 @@ def visualize_and_select_vectors_for_rlps(rlps: List[dict],
         plt_rlp.add_callback("CharEvent", key_cb)
 
         print(f"[info] Joint Selection for Pair Parts {p_idx} ↔ {q_idx} ({len(vec_actors)} vector candidates total):")
-        print("  \033[37m[Gray Tube]\033[0m Default Candidate (None)")
-        print("  \033[33m[Yellow Tube]\033[0m Click 1: Revolute Joint")
-        print("  \033[34m[Blue Tube]\033[0m Click 2: Prismatic Joint")
+        print("  \033[37m[Gray Arrow]\033[0m Default Candidate (None)")
+        print("  \033[38;2;255;255;0m[Yellow Arrow]\033[0m Click 1: Revolute Joint")
+        print("  \033[38;2;0;0;255m[Blue Arrow]\033[0m Click 2: Prismatic Joint")
 
         import time
         import functions
@@ -627,6 +681,7 @@ def visualize_k_hop_plane(
     display: bool = True,
     loop_indices: np.ndarray | None = None,
     parent_part: int = 1,
+    loop_color: str | None = None,
 ):
     """
     Visualize k-hop local geometry with black wireframe edges on submesh,
@@ -675,16 +730,18 @@ def visualize_k_hop_plane(
             khop_mesh.lw(0.8).lc("black")  # Black wireframe edges ONLY on k-hop local geometry submesh
             actors.append(khop_mesh)
 
-    # 3) Boundary loop points as bubble spheres (기존 bubble 형태로 표시)
+    # 3) Boundary loop points as bubble spheres (기존 bubble 형태로 표시, 이전 단계와 동일한 색상 적용)
     if loop_indices is not None and loop_indices.size > 0:
-        loop_pts = vedo.Spheres(verts[loop_indices], r=0.006, c=pos_color, res=8).alpha(1.0)
+        c_bubble = loop_color if loop_color is not None else pos_color
+        loop_pts = vedo.Spheres(verts[loop_indices], r=0.006, c=c_bubble, res=8).alpha(1.0)
         actors.append(loop_pts)
 
-    # 4) Estimated plane(s) - both planes in light gray (#B3B3B3)
-    plane_color = "#B3B3B3"
+    # 4) Estimated plane(s) - subtle gray colors so multiple planes (e.g. polyhedral) can be distinguished
+    poly_plane_colors = ["#9EAEC4", "#C4AE9E", "#9EC4AF", "#C49EC1"]
     for i, (n, d) in enumerate(planes):
         plane_pos = center - (np.dot(center, n) + d) * n
-        plane_actor = vedo.Plane(pos=plane_pos, normal=n, s=(1.0, 1.0)).c(plane_color).alpha(0.25)
+        c_plane = poly_plane_colors[i % len(poly_plane_colors)] if len(planes) > 1 else "#B3B3B3"
+        plane_actor = vedo.Plane(pos=plane_pos, normal=n, s=(1.0, 1.0)).c(c_plane).alpha(0.25)
         actors.append(plane_actor)
 
     # 5) Vector visualization according to plane estimation type (Unified size & colors):
