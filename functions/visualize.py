@@ -4,8 +4,7 @@ import trimesh
 from functions import find_boundary_loops
 
 
-# find_boundary_loops 함수는 이미 스크립트에 있으므로 재정의할 필요는 없습니다.
-# 이 함수들이 find_boundary_loops를 사용합니다.
+# These functions use find_boundary_loops (imported, not redefined).
 
 def show_mesh(ms, title="Intermediate Step", enabled=True, verbose=False, highlight_boundary_loops=False):
     '''
@@ -24,7 +23,7 @@ def show_mesh(ms, title="Intermediate Step", enabled=True, verbose=False, highli
     vertices = current_mesh.vertex_matrix()
     faces = current_mesh.face_matrix()
 
-    # 1. 기본 메쉬 생성
+    # 1. Base mesh
     o3d_mesh = o3d.geometry.TriangleMesh(o3d.utility.Vector3dVector(vertices),
                                          o3d.utility.Vector3iVector(faces))
     o3d_mesh.compute_vertex_normals()
@@ -32,20 +31,20 @@ def show_mesh(ms, title="Intermediate Step", enabled=True, verbose=False, highli
 
     geometries_to_draw = [o3d_mesh]
 
-    # 2. [업그레이드] 모든 경계 루프를 찾아 색상별로 LineSet 만들기
+    # 2. [Upgrade] Color-coded LineSets for all boundary loops
     if highlight_boundary_loops:
         t_mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
         loops = find_boundary_loops(t_mesh, verbose=True)
 
         if loops:
-            # 루프를 길이에 따라 정렬하여 가장 큰 것을 찾음
+            # Sort by length to find the largest
             loops.sort(key=len, reverse=True)
             largest_loop_indices = loops[0]
             other_loop_indices_list = loops[1:]
 
-            points = vertices  # LineSet의 포인트는 전체 메쉬의 정점
+            points = vertices  # LineSet uses all mesh vertices
 
-            # LineSet 1: 가장 큰 루프 (빨간색)
+            # LineSet 1: largest loop (red)
             largest_lines = []
             for i in range(len(largest_loop_indices) - 1):
                 largest_lines.append([largest_loop_indices[i], largest_loop_indices[i + 1]])
@@ -54,10 +53,10 @@ def show_mesh(ms, title="Intermediate Step", enabled=True, verbose=False, highli
             largest_line_set = o3d.geometry.LineSet()
             largest_line_set.points = o3d.utility.Vector3dVector(points)
             largest_line_set.lines = o3d.utility.Vector2iVector(largest_lines)
-            largest_line_set.paint_uniform_color([1, 0, 0])  # 빨간색
+            largest_line_set.paint_uniform_color([1, 0, 0])  # red
             geometries_to_draw.append(largest_line_set)
 
-            # LineSet 2: 나머지 루프들 (파란색)
+            # LineSet 2: other loops (blue)
             if other_loop_indices_list:
                 other_lines = []
                 for loop in other_loop_indices_list:
@@ -68,10 +67,10 @@ def show_mesh(ms, title="Intermediate Step", enabled=True, verbose=False, highli
                 other_line_set = o3d.geometry.LineSet()
                 other_line_set.points = o3d.utility.Vector3dVector(points)
                 other_line_set.lines = o3d.utility.Vector2iVector(other_lines)
-                other_line_set.paint_uniform_color([0, 0, 1])  # 파란색
+                other_line_set.paint_uniform_color([0, 0, 1])  # blue
                 geometries_to_draw.append(other_line_set)
 
-    # 3. 시각화
+    # 3. Visualize
     o3d.visualization.draw_geometries(geometries_to_draw, window_name=title)
 
 
@@ -88,7 +87,7 @@ def show_mesh_with_cutting_plane(ms, title, cut_z_value, enabled=True, verbose=F
     if verbose:
         print(f"[info] Visualize mesh, coordinate axis, cutting plane(z={cut_z_value}). ({title})")
 
-    # 1. 메쉬, 좌표축, 절단 평면 준비
+    # 1. Mesh, axes, cutting plane
     current_mesh = ms.current_mesh()
     vertices = current_mesh.vertex_matrix()
     faces = current_mesh.face_matrix()
@@ -108,11 +107,11 @@ def show_mesh_with_cutting_plane(ms, title, cut_z_value, enabled=True, verbose=F
         depth=max(mesh_bounds.get_extent()) * 0.005
     )
     plane.translate((mesh_center[0], mesh_center[1], cut_z_value - plane.get_max_bound()[2]), relative=False)
-    plane.paint_uniform_color([1, 0, 0])  # 절단 평면은 빨간색
+    plane.paint_uniform_color([1, 0, 0])  # cutting plane in red
 
     geometries_to_draw = [o3d_mesh, coord_frame, plane]
 
-    # 2. [업그레이드] 모든 경계 루프를 찾아 색상별로 LineSet 만들기
+    # 2. [Upgrade] Color-coded LineSets for all boundary loops
     if highlight_boundary_loops:
         t_mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
         loops = find_boundary_loops(t_mesh, verbose=True)
@@ -124,7 +123,7 @@ def show_mesh_with_cutting_plane(ms, title, cut_z_value, enabled=True, verbose=F
 
             points = vertices
 
-            # LineSet 1: 가장 큰 루프 (노란색)
+            # LineSet 1: largest loop (yellow)
             largest_lines = []
             for i in range(len(largest_loop_indices) - 1):
                 largest_lines.append([largest_loop_indices[i], largest_loop_indices[i + 1]])
@@ -133,10 +132,10 @@ def show_mesh_with_cutting_plane(ms, title, cut_z_value, enabled=True, verbose=F
             largest_line_set = o3d.geometry.LineSet()
             largest_line_set.points = o3d.utility.Vector3dVector(points)
             largest_line_set.lines = o3d.utility.Vector2iVector(largest_lines)
-            largest_line_set.paint_uniform_color([1, 1, 0])  # 노란색 (빨간색 평면과 구별)
+            largest_line_set.paint_uniform_color([1, 1, 0])  # yellow (distinct from red plane)
             geometries_to_draw.append(largest_line_set)
 
-            # LineSet 2: 나머지 루프들 (파란색)
+            # LineSet 2: other loops (blue)
             if other_loop_indices_list:
                 other_lines = []
                 for loop in other_loop_indices_list:
@@ -147,8 +146,8 @@ def show_mesh_with_cutting_plane(ms, title, cut_z_value, enabled=True, verbose=F
                 other_line_set = o3d.geometry.LineSet()
                 other_line_set.points = o3d.utility.Vector3dVector(points)
                 other_line_set.lines = o3d.utility.Vector2iVector(other_lines)
-                other_line_set.paint_uniform_color([0, 0, 1])  # 파란색
+                other_line_set.paint_uniform_color([0, 0, 1])  # blue
                 geometries_to_draw.append(other_line_set)
 
-    # 3. 시각화
+    # 3. Visualize
     o3d.visualization.draw_geometries(geometries_to_draw, window_name=title)

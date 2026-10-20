@@ -304,14 +304,14 @@ def learn_separator_main(
     for r_idx, r_loop in enumerate(loops):
         print(f"[debug] Raw loop {r_idx} size: {len(r_loop)}")
 
-    # 2. [NEW] Topology 기반 병합 및 필터링
-    #    - 서로 2칸(hop) 이내에 있는 루프들은 "같은 경계"로 보고 합칩니다.
-    #    - 합쳐진 결과가 15개 점 미만이면 노이즈로 보고 버립니다.
+    # 2. [NEW] Topology-based merge and filter
+    #    - Loops within 2 hops are merged as one boundary.
+    #    - Merged loops under min_size_to_keep points are dropped as noise.
     loops = merge_loops_by_topology(
         adj,
         loops,
-        max_hops=2,  # 거리가 2 hop 이내면 병합
-        min_size_to_keep=min_size_to_keep  # 병합 후에도 너무 작으면 삭제
+        max_hops=2,  # merge within 2 hops
+        min_size_to_keep=min_size_to_keep  # drop if still too small after merge
     )
 
     print(f"[info] Found {len(loops)} loops for part {idx_part}.")

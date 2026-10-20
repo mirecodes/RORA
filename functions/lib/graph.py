@@ -28,7 +28,7 @@ def classify_vertices(
     use_signed_dist: bool = True,
     sdf_thresh: float = 0.0,
     batch_size: int = 50000,
-    k_vote: int = 3,                      # <- 추가: 최근접 이웃 개수
+    k_vote: int = 3,                      # <- added: number of nearest neighbors
 ) -> np.ndarray:
     # TODO: Improve the classification algorithm
     V = len(verts)
@@ -89,7 +89,7 @@ def classify_vertices(
                         vert_label[take[upd]] = cid
 
     # ------------------------------
-    # (NEW) 최근접 k개 라벨-정점 투표 보정
+    # (NEW) k-nearest labeled-vertex vote fill-in
     # ------------------------------
     unlabeled = np.where(vert_label == -1)[0]
     if unlabeled.size == 0:
@@ -97,19 +97,19 @@ def classify_vertices(
 
     labeled = np.where(vert_label >= 0)[0]
     if labeled.size == 0:
-        # 라벨 있는 정점이 전혀 없으면 보정 불가
+        # No labeled vertices: nothing to vote with
         return vert_label
 
     k = int(min(k_vote, labeled.size))
 
     def vote_assign(u_idx: np.ndarray, nn_idx: np.ndarray, nn_dist: np.ndarray) -> np.ndarray:
         """
-        u_idx: (M,) 미분류 정점 인덱스
-        nn_idx: (M,k) labeled 배열 내 인덱스(로컬 인덱스)
-        nn_dist: (M,k) 거리
-        반환: (M,) 할당 라벨
+        u_idx: (M,) unlabeled vertex indices
+        nn_idx: (M,k) local indices into `labeled`
+        nn_dist: (M,k) distances
+        Returns: (M,) assigned labels
         """
-        # 로컬 인덱스를 글로벌 정점 인덱스로 변환
+        # Local -> global vertex indices
         neigh_global = labeled[nn_idx]             # (M,k)
         neigh_labels = vert_label[neigh_global]    # (M,k)
         out = np.full(u_idx.shape[0], -1, dtype=np.int32)
@@ -117,15 +117,15 @@ def classify_vertices(
         for m in range(u_idx.shape[0]):
             labs = neigh_labels[m]
             dists = nn_dist[m]
-            # 다수결
+            # Majority vote
             vals, cnts = np.unique(labs, return_counts=True)
-            # 최빈도 후보들
+            # Most frequent candidates
             maxc = np.max(cnts)
             cand = vals[cnts == maxc]
             if cand.size == 1:
                 out[m] = int(cand[0])
             else:
-                # 동표면 후보들 중 거리 합이 최소인 라벨 선택
+                # Tie: pick label with smallest distance sum
                 best_lab = None
                 best_sum = np.inf
                 for L in cand:
@@ -136,11 +136,11 @@ def classify_vertices(
                 out[m] = best_lab if best_lab is not None else int(cand[0])
         return out
 
-    # 우선 SciPy KDTree 시도
+    # Try SciPy KDTree first
     try:
         from scipy.spatial import cKDTree
         tree = cKDTree(verts[labeled])
-        # query 결과가 k==1이면 1D, 그 외 2D → 2D로 통일
+        # query returns 1D for k==1; normalize to 2D
         dists, idxs = tree.query(verts[unlabeled], k=k, workers=-1)
         if k == 1:
             dists = dists[:, None]
@@ -149,23 +149,21 @@ def classify_vertices(
         vert_label[unlabeled] = assign
         return vert_label
     except Exception:
-        # SciPy가 없거나 실패하면 배치 브루트포스(메모리 안전)
-        B = 8192  # 배치 크기
+        # Fallback: batched brute force (memory-safe)
+        B = 8192  # batch size
         for s in range(0, unlabeled.size, B):
             take = unlabeled[s:s+B]
             U = verts[take]                  # (b,3)
             L = verts[labeled]              # (L,3)
-            # 거리 제곱 (메모리 고려해 배치로 충분히 작게)
-            # b x L 행렬에서 각 행마다 k개 최솟값의 인덱스를 얻는다
-            # numpy.argpartition 사용
-            # (b, L) 거리 계산
+            # Squared distances (batched to bound memory)
+            # Per row of the (b, L) matrix, get k smallest via argpartition
             # (U - L)^2 = |U|^2 + |L|^2 - 2 U·L
             UU = np.sum(U*U, axis=1, keepdims=True)         # (b,1)
             LL = np.sum(L*L, axis=1, keepdims=True).T       # (1,L)
             d2 = UU + LL - 2.0 * (U @ L.T)                  # (b,L)
-            # k개 이웃의 로컬 인덱스
-            part = np.argpartition(d2, kth=k-1, axis=1)[:, :k]  # (b,k) 순서는 정렬X
-            # 해당 거리 추출 후 정렬
+            # Local indices of k neighbors
+            part = np.argpartition(d2, kth=k-1, axis=1)[:, :k]  # (b,k) unsorted
+            # Gather distances and sort
             row_idx = np.arange(part.shape[0])[:, None]
             dsel = d2[row_idx, part]
             order = np.argsort(dsel, axis=1)
@@ -252,35 +250,34 @@ def merge_loops_by_topology(
         adj: List[List[int]],
         loops: List[np.ndarray],
         max_hops: int = 2,
-        min_size_to_keep: int = 10  # 병합되지 못한 루프 중 너무 작은 것은 버림
+        min_size_to_keep: int = 10  # drop loops smaller than this after merging
 ) -> List[np.ndarray]:
     """
-    여러 개의 루프(점들의 리스트)를 입력받아,
-    그래프 상(Edge Hop)에서 가까운 루프끼리 하나로 '병합'합니다.
+    Merge loops (vertex index lists) that are within a few edge hops of each other.
 
     Args:
-        adj: 전체 메쉬의 Adjacency list
-        loops: extract_boundary_loops_robust 결과물 (List[np.array])
-        max_hops: 몇 칸 이내면 같은 덩어리로 볼 것인가 (보통 2~3)
-        min_size_to_keep: 병합 후에도 독립적으로 남은 루프가 이보다 작으면 노이즈로 간주하고 삭제
+        adj: mesh adjacency list
+        loops: output of extract_boundary_loops_robust (List[np.array])
+        max_hops: hop distance to treat loops as one group (typically 2-3)
+        min_size_to_keep: loops smaller than this after merging are dropped as noise
 
     Returns:
-        List[np.ndarray]: 병합된 루프 점들의 리스트.
-                          (주의: 병합된 루프는 더 이상 순차적인 경로(Path)가 아니라 점들의 집합(Cloud)이 됩니다.
-                           하지만 PCA/SVM 학습에는 순서가 상관없으므로 문제없습니다.)
+        List[np.ndarray]: merged loop vertices.
+                          (Note: merged loops are unordered point sets, not paths;
+                           fine for PCA/SVM, which ignore order.)
     """
     if not loops:
         return []
 
     num_loops = len(loops)
 
-    # 1. 각 루프의 '영향권(Frontier)' 미리 계산 (Set 변환)
-    #    매번 BFS를 돌면 느리므로, Set 연산으로 처리
+    # 1. Precompute each loop's k-hop frontier as a set
+    #    (avoids repeated BFS)
     loop_sets = [set(l) for l in loops]
     expanded_sets = []
 
     for l_idx, current_set in enumerate(loop_sets):
-        # 0-hop (자기 자신)
+        # 0-hop (self)
         frontier = current_set.copy()
 
         # Expand k-hops
@@ -288,7 +285,7 @@ def merge_loops_by_topology(
         for _ in range(max_hops):
             next_layer = set()
             for u in current_layer:
-                # adj[u]의 이웃들을 추가
+                # Add neighbors of u
                 for v in adj[u]:
                     if v not in frontier:
                         frontier.add(v)
@@ -298,20 +295,19 @@ def merge_loops_by_topology(
 
         expanded_sets.append(frontier)
 
-    # 2. 루프 간 인접 행렬 생성 (Meta-Graph)
+    # 2. Loop adjacency (meta-graph)
     #    loop_adjacency[i][j] = True if loop i is close to loop j
     meta_adj = [[] for _ in range(num_loops)]
 
     for i in range(num_loops):
         for j in range(i + 1, num_loops):
-            # i의 확장 영역이 j와 겹치거나, j의 확장 영역이 i와 겹치면 연결
-            # (교집합이 있는지 확인)
+            # Connect if either loop's frontier overlaps the other loop
             if not loop_sets[j].isdisjoint(expanded_sets[i]) or \
                     not loop_sets[i].isdisjoint(expanded_sets[j]):
                 meta_adj[i].append(j)
                 meta_adj[j].append(i)
 
-    # 3. 연결된 컴포넌트 찾기 (Connected Components)
+    # 3. Connected components
     visited = [False] * num_loops
     merged_results = []
 
@@ -319,7 +315,7 @@ def merge_loops_by_topology(
         if visited[i]:
             continue
 
-        # BFS/DFS로 연결된 루프 그룹 찾기
+        # DFS over connected loops
         component_indices = []
         stack = [i]
         visited[i] = True
@@ -332,23 +328,22 @@ def merge_loops_by_topology(
                     visited[neighbor] = True
                     stack.append(neighbor)
 
-        # 4. 그룹 내 병합 (Merge Vertices)
-        #    여러 루프의 점들을 하나로 합침
+        # 4. Merge vertices within the group
         if len(component_indices) == 1:
-            # 병합할 것 없음
+            # Nothing to merge
             final_loop = loops[component_indices[0]]
         else:
-            # 여러 개 병합
+            # Merge several
             arrays_to_merge = [loops[idx] for idx in component_indices]
             final_loop = np.concatenate(arrays_to_merge)
-            # 중복 제거 (혹시 겹친다면)
+            # Dedupe
             final_loop = np.unique(final_loop)
 
-        # 5. 크기 필터링 (너무 작은 노이즈 덩어리는 제외)
+        # 5. Size filter (drop small noise)
         if len(final_loop) >= min_size_to_keep:
             merged_results.append(final_loop)
 
-    # 크기순 정렬 (메인 루프가 먼저 오도록)
+    # Sort by size (main loop first)
     merged_results.sort(key=len, reverse=True)
 
     return merged_results
@@ -359,11 +354,11 @@ def extract_boundary_loops_robust(
         part_indices: np.ndarray,
         min_len: int = 4,
         open_loop_threshold: int = 10,
-        min_new_edge_frac: float = 0.25  # <--- [ADDED] 겹침 비율 임계값
+        min_new_edge_frac: float = 0.25  # <--- [ADDED] overlap ratio threshold
 ) -> List[np.ndarray]:
     """
-    Mesh의 Face Winding Order를 사용하여 경계 루프를 추출하고,
-    '정보량(새로운 엣지 비율)'을 기준으로 유효한 루프만 선별합니다.
+    Extract boundary loops via face winding order, keeping only loops
+    with enough new edges (information gain).
     """
     # ---------------------------------------------------------
     # 1. Prepare Boundary Edges (Directed)
@@ -413,8 +408,8 @@ def extract_boundary_loops_robust(
         # Check validity
         if not adj_map[start_node]: continue
 
-        # 이미 방문한 엣지에서 시작하는 경우 스킵 (탐색 중복 방지)
-        # 단, 완벽한 중복 방지는 아래 Filtering 단계에서 수행하므로 여기선 느슨하게 체크
+        # Skip if all outgoing edges already walked (loose check;
+        # exact dedupe happens in the filtering step below)
         valid_start = False
         for neighbor in adj_map[start_node]:
             if (start_node, neighbor) not in visited_edges_during_walk:
@@ -457,7 +452,7 @@ def extract_boundary_loops_robust(
     # ---------------------------------------------------------
     # 3. Filter Candidates (Selection Logic like segregate_loops)
     # ---------------------------------------------------------
-    # Sort by length descending (긴 루프 우선)
+    # Sort by length descending (longest first)
     candidates.sort(key=lambda x: len(x[0]), reverse=True)
 
     selected_loops: List[np.ndarray] = []
@@ -472,12 +467,12 @@ def extract_boundary_loops_robust(
         current_edges = set()
 
         if is_closed:
-            # 닫힌 루프: (0,1), (1,2), ..., (last, 0)
+            # Closed loop: (0,1), (1,2), ..., (last, 0)
             for i in range(len(path)):
                 u, v = path[i], path[(i + 1) % len(path)]
                 current_edges.add(get_edge_key(u, v))
         else:
-            # 열린 루프: (0,1), (1,2), ..., (n-2, n-1)
+            # Open loop: (0,1), (1,2), ..., (n-2, n-1)
             for i in range(len(path) - 1):
                 u, v = path[i], path[i + 1]
                 current_edges.add(get_edge_key(u, v))
@@ -488,7 +483,7 @@ def extract_boundary_loops_robust(
         # Check Overlap
         new_edges = current_edges - globally_used_edges
 
-        # [CHECK] 새로운 정보의 비율 확인
+        # [CHECK] Ratio of new edges
         ratio = len(new_edges) / len(current_edges)
 
         if ratio >= min_new_edge_frac:
@@ -508,9 +503,9 @@ def segregate_loops(adj: List[List[int]], boundary_indices: np.ndarray) -> List[
     MIN_LEN = 4  # drop tiny loops
     MIN_NEW_EDGE_FRAC = 0.5  # overlap filtering
 
-    # [FIX] 무한 루프 방지를 위한 안전장치 추가
-    MAX_CYCLES = math.inf  # 찾을 사이클의 최대 개수 (충분히 큰 값)
-    MAX_DFS_ITER = math.inf  # DFS 탐색 최대 반복 횟수
+    # [FIX] Safety limits against runaway search
+    MAX_CYCLES = math.inf  # max cycles to find
+    MAX_DFS_ITER = math.inf  # max DFS iterations
     # -------------------------------------------------------
 
     B = set(map(int, np.asarray(boundary_indices, dtype=int).ravel()))
@@ -573,7 +568,7 @@ def segregate_loops(adj: List[List[int]], boundary_indices: np.ndarray) -> List[
     seen_cycles: set[Tuple[int, ...]] = set()
     cycles: list[list[int]] = []
 
-    dfs_counter = 0  # 총 탐색 횟수 카운터
+    dfs_counter = 0  # total DFS iterations
 
     def canonical_cycle(cyc: list[int]) -> Tuple[int, ...]:
         if len(cyc) >= 2 and cyc[0] == cyc[-1]:
@@ -592,7 +587,7 @@ def segregate_loops(adj: List[List[int]], boundary_indices: np.ndarray) -> List[
     stop_search = False
 
     for u in nodes:
-        if stop_search: break  # 전체 제한 도달 시 중단
+        if stop_search: break  # global limit reached
 
         for v in core_adj[u]:
             if v <= u: continue  # undirected unique order
@@ -601,13 +596,13 @@ def segregate_loops(adj: List[List[int]], boundary_indices: np.ndarray) -> List[
             stack = [(u, v, [u, v])]
 
             while stack:
-                # [CHECK 1] DFS 반복 횟수 제한 (너무 깊거나 넓은 탐색 방지)
+                # [CHECK 1] DFS iteration limit
                 dfs_counter += 1
                 if dfs_counter > MAX_DFS_ITER:
                     stop_search = True
                     break
 
-                # [CHECK 2] 찾은 사이클 개수 제한
+                # [CHECK 2] Cycle count limit
                 if len(cycles) >= MAX_CYCLES:
                     stop_search = True
                     break
@@ -624,7 +619,7 @@ def segregate_loops(adj: List[List[int]], boundary_indices: np.ndarray) -> List[
                     if w == root:
                         # Cycle Found
                         if len(path) >= 3:
-                            # canonical 변환 비용을 줄이기 위해 길이 체크 먼저
+                            # Length check first; canonicalization is costly
                             if len(path) >= MIN_LEN:
                                 cyc = canonical_cycle(path[:])
                                 if cyc not in seen_cycles:
@@ -650,7 +645,7 @@ def segregate_loops(adj: List[List[int]], boundary_indices: np.ndarray) -> List[
     used_edges: set[Tuple[int, int]] = set()
 
     for cyc in cycles:
-        # [MODIFIED] Path를 닫힌 루프로 만들기 위해 마지막 연결부 포함하여 엣지 생성
+        # [MODIFIED] Include closing edge so the path forms a loop
         # zip(cyc, cyc[1:] + cyc[:1]) -> (0,1), (1,2), ..., (last, 0)
         cyc_edges = {ekey(a, b) for a, b in zip(cyc, cyc[1:] + [cyc[0]])}
 
@@ -659,7 +654,7 @@ def segregate_loops(adj: List[List[int]], boundary_indices: np.ndarray) -> List[
 
         new_edges = cyc_edges - used_edges
 
-        # 분모가 0이 되는 것을 방지하고, 새로운 정보가 많은지 확인
+        # Guard zero division; keep if enough new edges
         if len(cyc_edges) > 0:
             ratio = len(new_edges) / len(cyc_edges)
             if ratio >= MIN_NEW_EDGE_FRAC:
@@ -686,7 +681,7 @@ def identify_loop_neighbor(
     for u in loop:
         for v in adj[u]:
             l_v = int(vert_label[v])
-            # 0(배경)이나 자기 자신(parent)은 제외하고 카운트
+            # Exclude background (0) and parent
             if l_v > 0 and l_v != parent_label:
                 counts[l_v] += 1
                 total_neighbors += 1
@@ -853,24 +848,24 @@ def cluster_reciprocal_loop_pairs(
     *,
     w_pos: float = 1.0,
     w_ang: float = 0.5,
-    cost_max: float | None = None,  # 매칭 허용 상한(선택)
+    cost_max: float | None = None,  # optional max match cost
 ) -> List[Dict]:
     """
-    results: learn_separator_main per-loop 결과 리스트.
-      각 원소는 최소한 아래 키를 가짐:
+    results: per-loop results from learn_separator_main.
+      Each item has at least:
         - 'parent': int, 'child': int
         - 'center': (3,), 'pca_normal': (3,)
-        - (원하면 'loop' 등 원본 식별자를 그대로 유지)
-    반환: RLP(상호 루프쌍) 리스트. 각 항목 구조:
+        - (other keys like 'loop' are passed through)
+    Returns: list of RLPs (reciprocal loop pairs), each:
        {
-        'parts': (i, j),                     # 정렬된 파트쌍 (min, max)
-        'a': a_dict, 'b': b_dict,            # 대응된 원본 루프(방향 i->j, j->i)
-        'center': (3,),                      # 평균 center
-        'normal': (3,),                      # 방향 정합 후 평균 정규화
-        'cost': float,                       # 매칭 비용
+        'parts': (i, j),                     # sorted part pair (min, max)
+        'a': a_dict, 'b': b_dict,            # matched loops (i->j, j->i)
+        'center': (3,),                      # mean center
+        'normal': (3,),                      # aligned, averaged, normalized
+        'cost': float,                       # match cost
        }
     """
-    # 1) 파트쌍 단위로 그룹핑 (무순서 쌍)
+    # 1) Group by unordered part pair
     buckets: Dict[Tuple[int, int], Dict[str, List[Dict]]] = {}
     for it in results:
         # it["child"] might be a list now, so we need to handle that.
@@ -884,26 +879,26 @@ def cluster_reciprocal_loop_pairs(
         q = int(it["child"])
 
         if p == q:
-            # 자기-루프는 건너뜀
+            # Skip self-pairs
             continue
         key = (p, q) if p < q else (q, p)
-        dir_key = "A" if (p < q) else "B"   # A: p->q (작은->큰), B: q->p (큰->작은)
+        dir_key = "A" if (p < q) else "B"   # A: p->q (small->large), B: q->p (large->small)
         if key not in buckets:
             buckets[key] = {"A": [], "B": []}
         buckets[key][dir_key].append(it)
 
     RLPs: List[Dict] = []
 
-    # 2) 각 파트쌍마다 최소 비용 매칭
+    # 2) Min-cost matching per part pair
     for (i, j), grp in buckets.items():
         A = grp["A"]  # i->j
         B = grp["B"]  # j->i
         
-        # [INFO] 각 방향별 루프 개수 출력
+        # [INFO] Loop count per direction
         print(f"[info] Pair ({i}, {j}): found {len(A)} loops (i->j) and {len(B)} loops (j->i).")
         
         if not A or not B:
-            continue  # 한쪽 방향만 있으면 매칭 불가
+            continue  # need both directions to match
         
         # If multiple neighbors were detected, we might have multiple entries for the same loop.
         # We should handle this. For now, we treat them as separate candidates.
@@ -931,10 +926,10 @@ def cluster_reciprocal_loop_pairs(
         C = _build_cost_matrix(A, B, w_pos=w_pos, w_ang=w_ang)
         pairs = _hungarian_or_greedy(C)
         
-        # [INFO] 매칭된 RLP 개수 출력
+        # [INFO] Matched RLP count
         print(f"[info] Pair ({i}, {j}): matched {len(pairs)} RLPs.")
 
-        # 3) 페어 생성 (코스트 상한 필터)
+        # 3) Build pairs (filter by cost_max)
         for ia, ib in pairs:
             cost = float(C[ia, ib])
             if (cost_max is not None) and (cost > cost_max):
@@ -955,7 +950,7 @@ def cluster_reciprocal_loop_pairs(
             else:
                 nb = normalize(np.asarray(b["pca_normal"], dtype=float))
                 
-            # normal 방향 정합 (90도 이상 벌어지면 뒤집어서 일치시킴)
+            # Align normals (flip if > 90 deg apart)
             if float(np.dot(na, nb)) < 0.0:
                 nb = -nb
             n_pair = normalize(na + nb) if np.linalg.norm(na + nb) > 1e-9 else na
@@ -968,6 +963,6 @@ def cluster_reciprocal_loop_pairs(
                 "cost": cost,
             })
 
-    # 4) 정렬(코스트 오름차순) 또는 길이 등 다른 기준도 가능
+    # 4) Sort by cost ascending (other keys possible)
     RLPs.sort(key=lambda d: d["cost"])
     return RLPs

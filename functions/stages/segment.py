@@ -191,7 +191,7 @@ def append_single_loop_rlps(results_list: List[dict], rlps: List[dict], verts: n
         loops_12 = pair_to_res.get((p1, p2), [])
         loops_21 = pair_to_res.get((p2, p1), [])
         
-        # 1, 0 또는 0, 1 인 경우 확인
+        # Exactly one loop in one direction (1,0) or (0,1)
         if (len(loops_12) == 1 and len(loops_21) == 0) or (len(loops_12) == 0 and len(loops_21) == 1):
             single = loops_12[0] if len(loops_12) == 1 else loops_21[0]
             
@@ -217,7 +217,7 @@ def append_single_loop_rlps(results_list: List[dict], rlps: List[dict], verts: n
                 rlp = {
                     'parts': key,
                     'a': single,
-                    'b': single,  # 다운스트림 처리에서 에러 방지를 위해 b에도 동일하게 할당
+                    'b': single,  # duplicate into b so downstream code doesn't break
                     'center': center.tolist(),
                     'normal': n_val.tolist(),
                     'cost': 0.0,

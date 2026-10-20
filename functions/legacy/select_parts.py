@@ -62,7 +62,7 @@ if __name__ == "__main__":
         # Convert to vedo Mesh (with random color)
         vmesh = vedo.Mesh([tri.vertices, tri.faces])
         rand_color = np.random.rand(3)  # RGB (0~1)
-        vmesh.c(rand_color).alpha(0.4)  # 색상 + 투명도(0.6)
+        vmesh.c(rand_color).alpha(0.4)  # color + 60% transparency
         vedo_meshes.append(vmesh)
 
     mesh = trimesh.load(cfg.mesh_in_dir, force="mesh")
@@ -79,37 +79,37 @@ if __name__ == "__main__":
             return
         if picked in vedo_meshes:
             segment_category[current_group].append(picked)
-            picked.c("green")  # 클릭하면 색을 임시로 바꿔줌
+            picked.c("green")  # temp highlight on click
             plt.render()
             print(f"[INFO] Added mesh to {current_group}")
 
 
     def switch_group():
-        """버튼 눌러서 저장 그룹 전환"""
+        """Button: switch target group"""
         global current_group
         current_group = "part2" if current_group == "part1" else "part1"
         print(f"[INFO] Now selecting for {current_group}")
 
 
     def finalize_selection(*args):
-        """선택한 파트를 다른 색으로 칠해 최종 렌더링"""
+        """Recolor selected parts and render final view"""
         for parts in segment_category:
             for part in parts:
                 rand_color = np.random.rand(3)  # RGB (0~1)
-                part.c(rand_color).alpha(0.4)  # 색상 + 투명도(0.6)
+                part.c(rand_color).alpha(0.4)  # color + 60% transparency
 
         plt.render()
         print("[INFO] Finalized: part1=red, part2=blue")
 
 
-    # GUI 생성
+    # Create GUI
     plt = vedo.Plotter(title="Click to select parts")
     plt.add_callback("mouse_click", on_pick)
 
-    # 그룹 전환 버튼
+    # Switch-group button
     plt.add_button(switch_group, pos=(0.7, 0.05), states=["Switch Group"], size=25, c="black", bc="orange")
 
-    # 최종 색칠 버튼
+    # Finalize-coloring button
     plt.add_button(finalize_selection, pos=(0.85, 0.05), states=["Finalize"], size=25, c="black", bc="lightgreen")
 
     plt.show(vedo_meshes, axes=1)

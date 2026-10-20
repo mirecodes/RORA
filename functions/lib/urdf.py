@@ -32,20 +32,19 @@ def mapping_get(mapping, key):
 # =============================================================================
 def build_joints_from_rlps(rlps: List[dict]) -> List[dict]:
     """
-    RLP(Radial Line Pair) 정보로부터 조인트 후보군을 추출합니다.
-    여기서는 아직 트리 구조를 강제하지 않고, 기하학적으로 발견된 모든 연결을 반환합니다.
+    Extract joint candidates from RLPs (Radial Line Pairs).
+    No tree structure enforced yet; returns every geometric connection found.
     """
     picked = []
     for rlp in rlps:
         p = int(rlp.get("a", {}).get("parent", rlp.get("parent", -1)))
         c = int(rlp.get("a", {}).get("child", rlp.get("child", -1)))
 
-        # 유효성 검사
+        # Validate
         if p < 0 or c < 0 or p == c:
             continue
 
-        # 일단 입력된 순서대로 저장 (나중에 트리 구성 단계에서 재정렬됨)
-        # 단, 내부적으로는 i < j 순서로 pair를 key로 쓰기 위해 정렬
+        # Sort to an (i < j) pair key; direction is fixed later in tree building
         i, j = (p, c) if p < c else (c, p)
 
         for v in (rlp.get("vectors") or []):
@@ -65,7 +64,7 @@ def build_joints_from_rlps(rlps: List[dict]) -> List[dict]:
     if not picked:
         return []
 
-    # 클러스터링 로직 (같은 위치의 여러 벡터 병합)
+    # Cluster vectors sharing the same origin
     O = np.vstack([x["origin"] for x in picked])
     bb = O.max(axis=0) - O.min(axis=0)
     diag = float(np.linalg.norm(bb))
@@ -102,12 +101,12 @@ def build_joints_from_rlps(rlps: List[dict]) -> List[dict]:
             origin = group_centers[g_idx]
             types = {it["type"] for it in items}
 
-            # 타입이 섞이면 에러 처리 (여기서는 첫 번째 타입 채택)
+            # Mixed types: take the first
             jtype = next(iter(types))
             dirs = np.vstack([it["n"] for it in items])
 
-            # parent, child는 일단 pair의 순서(작은값, 큰값)대로 저장하지만
-            # 나중에 build_valid_tree_joints에서 방향이 결정됨
+            # parent/child stored as (min, max) for now;
+            # build_valid_tree_joints decides direction
             joint_def = {
                 "parent": pair[0], "child": pair[1],
                 "axis": {"origin": origin.astype(float).tolist()},
@@ -115,17 +114,17 @@ def build_joints_from_rlps(rlps: List[dict]) -> List[dict]:
             }
 
             if jtype == "Revolute" and len(items) >= 2:
-                # Spherical 등 복합 조인트 처리
+                # Multi-axis revolute -> Spherical
                 joint_def["type"] = "Spherical"
-                joint_def["axis"]["n"] = dirs[0].astype(float).tolist()  # 대표축
+                joint_def["axis"]["n"] = dirs[0].astype(float).tolist()  # representative axis
             elif jtype == "Prismatic" and len(items) >= 2:
-                # Planar 처리
+                # Multi-axis prismatic -> Planar
                 _, _, Vt = np.linalg.svd(dirs, full_matrices=False)
                 n_plane = normalize(Vt[-1])
                 joint_def["type"] = "Planar"
                 joint_def["axis"]["n"] = n_plane.astype(float).tolist()
             else:
-                # 일반 조인트
+                # Single-axis joint
                 n = dirs[0]
                 joint_def["axis"]["n"] = n.astype(float).tolist()
 
@@ -139,58 +138,56 @@ def build_joints_from_rlps(rlps: List[dict]) -> List[dict]:
 # ================================
 def build_valid_tree_joints(raw_joints: List[dict], all_link_ids: List[int]) -> Tuple[List[dict], Set[int]]:
     """
-    모든 조인트 정보를 그래프로 구성한 뒤, BFS를 통해 순환 없는 트리 구조(Spanning Tree)를 생성합니다.
-    1. 작은 ID가 부모가 되도록 우선순위를 둡니다.
-    2. 연결이 끊긴 노드를 찾아내거나, 루프를 끊습니다.
+    Build a joint graph and extract an acyclic spanning tree via BFS.
+    1. Smaller IDs are preferred as parents.
+    2. Breaks cycles and reports disconnected nodes.
     """
     if not all_link_ids:
         return [], set()
 
-    # 1. 인접 리스트 생성 (Undirected Graph)
+    # 1. Undirected adjacency list
     # adj[u] = [(v, joint_info), ...]
     adj = defaultdict(list)
     for j in raw_joints:
         p, c = int(j["parent"]), int(j["child"])
-        # 원본 데이터와 함께 저장
+        # Keep original joint data
         adj[p].append((c, j))
         adj[c].append((p, j))
 
-    # 2. BFS 초기화
-    # 루트 노드 선정 (가장 작은 ID를 루트로 가정, 보통 1번)
+    # 2. BFS init
+    # Root = smallest ID (usually 1)
     root_id = min(all_link_ids)
     visited = {root_id}
     queue = deque([root_id])
 
     valid_joints = []
 
-    # 3. BFS 탐색
+    # 3. BFS
     while queue:
         u = queue.popleft()
 
-        # 인접 노드들을 '번호 순'으로 정렬하여 큐에 넣음
-        # -> 이렇게 해야 "작은 숫자가 부모가 되는" 경향을 유지할 수 있음
+        # Visit neighbors in ID order so smaller IDs tend to be parents
         neighbors = sorted(adj[u], key=lambda x: x[0])
 
         for v, j_info in neighbors:
             if v in visited:
                 continue
 
-            # v를 처음 방문함 -> u가 부모, v가 자식으로 확정
+            # First visit of v -> u is parent, v is child
             visited.add(v)
             queue.append(v)
 
-            # 조인트 정보 복사 및 parent/child 재설정
+            # Copy joint and reset parent/child
             new_joint = j_info.copy()
             new_joint["parent"] = u
             new_joint["child"] = v
 
-            # 만약 원본 정보와 parent/child가 뒤바꼈다면?
-            # (기하학적 축 방향은 유지하되, 물리적 의미는 사용자가 해석해야 함.
-            #  보통 회전축 선(Line) 자체는 변하지 않으므로 그대로 둡니다.)
+            # If parent/child got swapped vs. the original, the axis is kept as is
+            # (the axis line itself is unchanged; physical meaning is up to the user).
 
             valid_joints.append(new_joint)
 
-    # 4. 고립된 노드 확인 (Visited에 없는 노드들)
+    # 4. Isolated nodes (not visited)
     unvisited = set(all_link_ids) - visited
 
     return valid_joints, unvisited
@@ -250,7 +247,7 @@ def urdf_inertia_dict(I):
 
 def gather_link_frame_origins(joints, base_origin=np.zeros(3), transform_matrix=None):
     """
-    트리 구조가 확정된 joints 리스트를 순회하며 각 링크의 World 원점을 계산
+    Compute each link's world origin from tree-ordered joints.
     """
     base_origin = np.asarray(base_origin, float)
     if transform_matrix is not None:
@@ -260,10 +257,9 @@ def gather_link_frame_origins(joints, base_origin=np.zeros(3), transform_matrix=
 
     link_o = {0: base_origin}  # 0 reserved for base
 
-    # joints는 이미 BFS로 정렬되어 있으므로(부모가 먼저 방문됨), 순차적으로 계산 가능
-    # 하지만 딕셔너리로 안전하게 처리
+    # joints are BFS-ordered (parents first), but use dicts to be safe
 
-    # 1. 트리 구성을 위한 룩업
+    # 1. Tree lookups
     children_of = defaultdict(list)
     joint_by_child = {}
     for j in joints:
@@ -271,29 +267,28 @@ def gather_link_frame_origins(joints, base_origin=np.zeros(3), transform_matrix=
         children_of[p].append(c)
         joint_by_child[c] = j
 
-    # 2. 루트 찾기 (joints 리스트에 없는 최상위 부모들)
-    # 보통 link_1 이지만, valid_tree_joints 로직에 따라 결정됨
-    # 이 함수 외부에서 link_1을 base에 붙이므로, 여기선 재귀적으로 계산
+    # 2. Roots (top-level parents never appearing as child)
+    # Usually link_1, depending on build_valid_tree_joints
+    # The caller attaches link_1 to base
 
-    # 계산을 위해 모든 링크 ID 수집
+    # Collect all link IDs
     all_links = set()
     for j in joints:
         all_links.add(int(j["parent"]))
         all_links.add(int(j["child"]))
 
-    # 재귀적으로 위치 계산
+    # Recursive position calc
     def _calc_pos(lid, parent_pos):
-        link_o[lid] = parent_pos  # 링크의 원점은 부모 조인트 위치가 아니라, 일단 부모와 상대적 위치...
-        # 수정: URDF에서 Link의 Origin은 보통 Visual mesh의 원점과 일치시킴 (World 좌표)
-        # Joint의 Origin이 Link의 pivot point가 됨.
+        link_o[lid] = parent_pos  # relative to parent for now...
+        # Note: in URDF, link origin usually matches the visual mesh origin (world);
+        # the joint origin becomes the link's pivot.
 
-        # 여기서는 "각 링크가 World에서 어디에 있는지" (Mesh 원점 기준)를 저장
-        # 부모가 확정되면, 자식 Joint의 Origin을 알 수 있음.
+        # Stores where each link sits in world (mesh origin basis);
+        # once the parent is known, the child joint origin follows.
         pass
 
-    # 로직 수정: 단순히 Joint 정의에 있는 'Origin'은 World 좌표계(입력 데이터 기준) 값이므로
-    # 부모/자식 관계와 상관없이 Joint Origin 좌표 자체는 불변함.
-    # 따라서 그냥 Joint 정보를 순회하며 저장하면 됨.
+    # Joint 'origin' is already in world coords (input data), independent of
+    # parent/child, so just iterate joints and store it.
 
     for j in joints:
         c = int(j["child"])
@@ -304,10 +299,10 @@ def gather_link_frame_origins(joints, base_origin=np.zeros(3), transform_matrix=
             p_trans = np.dot(transform_matrix, p_h)
             o = p_trans[:3] / p_trans[3]
 
-        link_o[c] = o  # 자식 링크의 피벗 포인트(Joint Origin) 저장
+        link_o[c] = o  # child link pivot (joint origin)
 
-        # 부모가 아직 link_o에 없다면? (최상위 루트)
-        # 보통 link_1 은 아래 로직에서 base_joint를 통해 0(base)에 연결되므로 초기값 사용
+        # Parent not yet in link_o (top-level root):
+        # use base origin, since link_1 is attached to base via base_joint
         p = int(j["parent"])
         if p not in link_o:
             link_o[p] = base_origin
@@ -342,29 +337,29 @@ def generate_urdf(
     mesh_paths = export_meshes(meshes_to_export, os.path.join(out_dir, "meshes"), fmt=mesh_fmt)
 
     # ==========================================
-    # 1. 트리 구조 재구성 (Tree Logic Applied Here)
+    # 1. Rebuild tree (Tree Logic Applied Here)
     # ==========================================
     link_ids = sorted(closed_parts.keys())
 
-    # BFS를 이용해 순환을 제거하고 트리를 만듦. parent < child 규칙 준수 노력.
+    # BFS removes cycles; prefers parent < child.
     tree_joints, unvisited_links = build_valid_tree_joints(joints, link_ids)
 
     # ==========================================
-    # 2. 링크 원점 계산
+    # 2. Link origins
     # ==========================================
     link_frame_origin = gather_link_frame_origins(tree_joints, base_origin, transform_matrix)
 
-    # unvisited 링크들(고립된 링크)의 원점은 base_origin으로 가정
+    # Isolated (unvisited) links default to base_origin
     for uid in unvisited_links:
         if uid not in link_frame_origin:
-            # transform 적용
+            # Apply transform
             bo = np.asarray(base_origin, float)
             if transform_matrix is not None:
                 bo = (np.dot(transform_matrix, np.append(bo, 1.0)))[:3]
             link_frame_origin[uid] = bo
 
     # ==========================================
-    # 3. XML 생성
+    # 3. Build XML
     # ==========================================
     robot = ET.Element("robot", name=urdf_name)
 
@@ -387,8 +382,8 @@ def generate_urdf(
         link_o_world = link_frame_origin.get(lid, np.zeros(3))
 
         # Visual/Collision Origin = - (Link Frame Origin)
-        # 메쉬는 파일 자체가 World 좌표계(혹은 Local 0,0,0)에 있으므로,
-        # URDF상에서 Visual Origin을 역으로 이동시켜야 링크 프레임 원점에 메쉬가 맞음
+        # Mesh files are in world coords, so offset the visual origin
+        # inversely to align the mesh with the link frame
         rel_xyz = to_str_xyz(np.asarray([0, 0, 0], float) - link_o_world)
 
         # Visual
@@ -416,7 +411,7 @@ def generate_urdf(
     # Joints (from Tree)
     for j in tree_joints:
         parent, child = int(j["parent"]), int(j["child"])
-        parent_name = f"link_{parent}"  # 트리 내부 연결은 모두 link_X 간 연결
+        parent_name = f"link_{parent}"  # tree joints always connect link_X to link_X
         child_name = f"link_{child}"
 
         # Origin Calc
@@ -462,9 +457,9 @@ def generate_urdf(
     # 4. Base & Disconnected Link Handling
     # ==========================================
     # 4-1. Main Root Connection (Base -> Link 1 or min_id)
-    # 트리의 루트(BFS 시작점)를 Base에 고정
+    # Fix the tree root (BFS start) to base
     if link_ids:
-        root_id = min(link_ids)  # BFS에서 시작점으로 썼던 ID
+        root_id = min(link_ids)  # BFS start ID
         base_joint = ET.SubElement(robot, "joint", name=f"base_to_{root_id}", type="fixed")
         ET.SubElement(base_joint, "parent", link="base")
         ET.SubElement(base_joint, "child", link=f"link_{root_id}")
@@ -473,15 +468,15 @@ def generate_urdf(
         ET.SubElement(base_joint, "origin", xyz=to_str_xyz(root_origin), rpy="0 0 0")
 
     # 4-2. Floating Nodes Connection (Base -> Orphan)
-    # 조인트 정보가 없어서 트리에서 누락된 링크들은 Base에 고정시켜 에러 방지
+    # Fix links with no joint (missing from tree) to base
     for uid in unvisited_links:
-        if uid == min(link_ids): continue  # 이미 위에서 연결됨
+        if uid == min(link_ids): continue  # already attached above
 
         fix_joint = ET.SubElement(robot, "joint", name=f"fixed_base_{uid}", type="fixed")
         ET.SubElement(fix_joint, "parent", link="base")
         ET.SubElement(fix_joint, "child", link=f"link_{uid}")
 
-        # 고립된 링크의 원점은 Base 원점과 같다고 가정 (혹은 0,0,0)
+        # Isolated link origin = base origin (or 0,0,0)
         u_origin = link_frame_origin.get(uid, np.zeros(3))
         ET.SubElement(fix_joint, "origin", xyz=to_str_xyz(u_origin), rpy="0 0 0")
 

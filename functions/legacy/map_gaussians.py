@@ -7,7 +7,7 @@ from scipy.spatial import cKDTree
 from plyfile import PlyData, PlyElement
 from json_handler import JsonHandler
 
-# -------- helpers: 좌표/노멀 추출, 레이 필터, 카테고리 할당 --------
+# -------- helpers: position/normal extraction, ray filter, category assignment --------
 
 def _get_positions(rec):
     names = rec.dtype.names or ()
@@ -54,7 +54,7 @@ def _ensure_normals_any(rec):
         z = np.array([0.0,0.0,1.0]); R = _quat_to_R(q)
         n = (R @ z).astype(np.float64); n /= (np.linalg.norm(n, axis=1, keepdims=True) + 1e-12)
         return n
-    return None  # 노멀 불가 시 정렬/레이 필터 비활성
+    return None  # no normals: disables alignment/ray filter
 
 def _ray_filter(mesh, points, normals, max_len, eps):
     if normals is None:
@@ -110,7 +110,7 @@ class BindCfgs:
     drop_if_ray_miss: bool = True
     verbose: bool = True
 
-# -------- main: PlyData 방식 적용(모든 속성 보존 저장) --------
+# -------- main: PlyData-based (saves all properties) --------
 
 def stage_bind(cfgs, ms: pymeshlab.MeshSet):
     os.makedirs(cfgs.gaussian_out_dir, exist_ok=True)
@@ -119,34 +119,34 @@ def stage_bind(cfgs, ms: pymeshlab.MeshSet):
     mesh = trimesh.load(states.refine.dirs.mesh)
     vert_labels = states.segment.vert_label
 
-    # (핵심) Gaussian은 PlyData로 읽고 vertex 구조체를 그대로 유지
+    # (Key) read Gaussians via PlyData, keep vertex struct as-is
     g_ply = PlyData.read(states.transform.dirs.gaussian)
     g_rec = g_ply['vertex'].data
 
-    # 좌표/노멀 안전 추출
+    # Safe position/normal extraction
     gauss_xyz = _get_positions(g_rec)
     gauss_n   = _ensure_normals_any(g_rec)
 
     cfg = BindCfgs()
 
-    # 레이 기반 필터(노멀이 있을 경우에만)
+    # Ray filter (only if normals exist)
     diag = float(np.linalg.norm(mesh.bounds[1] - mesh.bounds[0]))
     ray_max = cfg.ray_max_rel * diag
     keep = _ray_filter(mesh, gauss_xyz, gauss_n, ray_max, cfg.ray_eps) if cfg.drop_if_ray_miss else np.ones(len(gauss_xyz), bool)
 
-    # 카테고리 할당
+    # Assign categories
     assigned = _assign_categories(mesh, vert_labels, gauss_xyz, gauss_n, cfg)
 
-    # (핵심) 저장: 원본 vertex의 모든 필드/순서/dtype 그대로, 마스크만 적용하여 깔끔 저장
+    # (Key) save: keep all original vertex fields/order/dtype, only apply mask
     cats = np.unique(assigned[keep])
     base_name = os.path.splitext(os.path.basename(states.transform.dirs.gaussian))[0]
     for c in cats:
         idxs = np.nonzero(keep & (assigned == c))[0]
         if idxs.size == 0:
             continue
-        sub = g_rec[idxs]  # 원본 구조체 배열 슬라이스(모든 property 그대로)
+        sub = g_rec[idxs]  # slice of original struct array (all properties kept)
         new_vertex = PlyElement.describe(sub, 'vertex')
-        new_ply = PlyData([new_vertex], text=False)  # 예제와 동일한 “깔끔한” 저장 스타일
+        new_ply = PlyData([new_vertex], text=False)  # same clean save style as the example
         out_path = os.path.join(cfgs.gaussian_out_dir, f"{base_name}_{int(c)}.ply")
         new_ply.write(out_path)
         if cfg.verbose:

@@ -710,7 +710,7 @@ def visualize_k_hop_plane(
             khop_mesh.lw(0.8).lc("black")  # Black wireframe edges ONLY on k-hop local geometry submesh
             actors.append(khop_mesh)
 
-    # 3) Boundary loop points as bubble spheres (기존 bubble 형태로 표시, 이전 단계와 동일한 색상 적용)
+    # 3) Boundary loop points as bubble spheres (same colors as previous stage)
     if loop_indices is not None and loop_indices.size > 0:
         c_bubble = loop_color if loop_color is not None else pos_color
         loop_pts = vedo.Spheres(verts[loop_indices], r=0.006, c=c_bubble, res=8).alpha(1.0)

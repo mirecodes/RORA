@@ -18,8 +18,8 @@ class SystemConfig:
     mesh_dev_path: str = "out/meshes/processed_spray.ply"
 
     # function toggle flags
-    automatic_alignment: bool = True  # True: 시작 시 PCA로 바닥면을 자동 정렬
-    step_by_step_visualization: bool = False  # True: 각 단계별로 결과물을 시각화
+    automatic_alignment: bool = True  # True: auto-align bottom via PCA at start
+    step_by_step_visualization: bool = False  # True: visualize each step
     apply_inverse_transform: bool = False
 
     # --------------------------------------------------------------------------
@@ -179,7 +179,7 @@ def run_refinement_pipeline(ms, sys_cfg, params_cfg):
     # Restore Transformation
     # --------------------------------------------------------------------------
 
-    print("\n[단계 11] 최종 메쉬를 원래 좌표계로 복원합니다...")
+    print("\n[Step 11] Restoring final mesh to original frame...")
     if sys_cfg.apply_inverse_transform:
         apply_inv_transform_from_matrix(ms, forward_transform)
     show_mesh(ms, title="After automated mesh refinement", enabled=sys_cfg.step_by_step_visualization)
@@ -209,7 +209,7 @@ def run_refinement_pipeline(ms, sys_cfg, params_cfg):
     # Save the Refined Mesh
     # --------------------------------------------------------------------------
 
-    print(f"\n최종 메쉬를 '{sys_cfg.mesh_out_dir}'에 저장 중...")
+    print(f"\nSaving final mesh to '{sys_cfg.mesh_out_dir}'...")
     os.makedirs(os.path.dirname(sys_cfg.mesh_out_dir), exist_ok=True)
     ms.save_current_mesh(sys_cfg.mesh_out_dir)
 

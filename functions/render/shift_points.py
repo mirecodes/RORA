@@ -5,91 +5,90 @@ from plyfile import PlyData, PlyElement
 
 def translate_ply(input_path: str, output_path: str, offset: tuple):
     """
-    .ply 파일의 모든 정점(vertex) 좌표를 주어진 오프셋만큼 이동시키고,
-    이동 전/후의 평균 좌표를 출력합니다.
+    Shift all vertices of a .ply by the given offset and print
+    the mean position before/after.
 
     Args:
-        input_path (str): 원본 .ply 파일 경로
-        output_path (str): 좌표 이동 후 저장할 .ply 파일 경로
-        offset (tuple): (x_offset, y_offset, z_offset) 형태의 튜플
+        input_path (str): source .ply path
+        output_path (str): output .ply path
+        offset (tuple): (x_offset, y_offset, z_offset)
     """
     try:
-        # 1. PlyData.read() 함수로 .ply 파일을 읽습니다.
-        print(f"'{input_path}' 파일을 읽는 중...")
+        # 1. Read .ply
+        print(f"Reading '{input_path}'...")
         plydata = PlyData.read(input_path)
 
-        # 2. 'vertex' 요소가 있는지 확인합니다.
+        # 2. Check 'vertex' element
         if 'vertex' not in plydata:
-            print("오류: 파일에 'vertex' 요소가 없습니다.")
+            print("Error: no 'vertex' element in file.")
             return
 
         vertices = plydata['vertex']
 
-        # 3. (추가) 좌표 이동 전 평균 위치를 계산하고 출력합니다.
-        #    np.mean() 함수로 각 좌표 배열의 평균을 계산합니다.
+        # 3. Mean position before shift
         avg_x_before = np.mean(vertices['x'])
         avg_y_before = np.mean(vertices['y'])
         avg_z_before = np.mean(vertices['z'])
         print("-" * 30)
-        print(f"좌표 이동 전 평균 위치:")
+        print(f"Mean position before shift:")
         print(f"  Avg X: {avg_x_before:.6f}")
         print(f"  Avg Y: {avg_y_before:.6f}")
         print(f"  Avg Z: {avg_z_before:.6f}")
         print("-" * 30)
 
-        # 4. 오프셋 값을 가져옵니다.
+        # 4. Offset
         x_offset, y_offset, z_offset = offset
-        print(f"적용할 오프셋: (x: {x_offset}, y: {y_offset}, z: {z_offset})")
+        print(f"Offset: (x: {x_offset}, y: {y_offset}, z: {z_offset})")
 
-        # 5. 'vertex' 데이터에 접근하여 좌표를 수정합니다.
+        # 5. Shift vertices
         vertices['x'] -= x_offset
         vertices['y'] -= y_offset
         vertices['z'] -= z_offset
         # vertices['x'] -= avg_x_before
         # vertices['y'] -= avg_y_before
         # vertices['z'] -= avg_z_before
-        print("모든 정점의 좌표 이동을 완료했습니다.")
+        print("All vertices shifted.")
 
-        # 6. (추가) 좌표 이동 후 평균 위치를 계산하고 출력합니다.
+        # 6. Mean position after shift
         avg_x_after = np.mean(vertices['x'])
         avg_y_after = np.mean(vertices['y'])
         avg_z_after = np.mean(vertices['z'])
         print("-" * 30)
-        print(f"좌표 이동 후 평균 위치:")
+        print(f"Mean position after shift:")
         print(f"  Avg X: {avg_x_after:.6f}")
         print(f"  Avg Y: {avg_y_after:.6f}")
         print(f"  Avg Z: {avg_z_after:.6f}")
         print("-" * 30)
 
-        # 7. 수정된 데이터로 새 .ply 파일을 작성합니다.
-        print(f"수정된 데이터를 '{output_path}' 파일에 저장하는 중...")
+        # 7. Write new .ply
+        print(f"Saving to '{output_path}'...")
         plydata.write(output_path)
 
-        print("작업이 성공적으로 완료되었습니다!")
+        print("Done.")
 
     except FileNotFoundError:
-        print(f"오류: '{input_path}' 파일을 찾을 수 없습니다.")
+        print(f"Error: '{input_path}' not found.")
     except Exception as e:
-        print(f"오류가 발생했습니다: {e}")
+        print(f"Error: {e}")
 
 
-# --- 메인 실행 부분 ---
+# --- Main ---
 if __name__ == "__main__":
 
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # functions/
 
-    # --- 여기를 수정하세요 ---
+    # --- Edit here ---
 
-    # 1. 원본 .ply 파일 경로
+    # 1. Source .ply path
     input_file = os.path.abspath(os.path.join(base_dir, "..", "export", "transfer", "spray_gaussian_6.ply"))
 
-    # 2. 결과물을 저장할 .ply 파일 경로
+    # 2. Output .ply path
     output_file = os.path.abspath(os.path.join(base_dir, "..", "export", "shifted_meshes", "shifted_spray_gaussian_6.ply"))
 
-    # 3. 이동시킬 기준 좌표 (오프셋 벡터)
+    # 3. Offset vector
     offset_vector = (0.639987, 1.448243, 1.526706)
 
     # -------------------------
 
-    # 함수 호출
+    # Run
     translate_ply(input_file, output_file, offset_vector)

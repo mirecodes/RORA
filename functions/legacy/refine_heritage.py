@@ -6,31 +6,31 @@ import trimesh
 from sklearn.decomposition import PCA
 from collections import defaultdict
 import open3d as o3d
-from scipy.spatial.transform import Rotation as R  # 회전 변환을 위해 scipy 임포트
+from scipy.spatial.transform import Rotation as R  # for rotation conversion
 from scipy.spatial import Delaunay
 
 
 @dataclass
 class MeshRefinementConfig:
     # --------------------------------------------------------------------------
-    # 1. 기본 설정 (사용자가 직접 수정)
+    # 1. Basic settings (user-editable)
     # --------------------------------------------------------------------------
-    # 프로젝트 루트 폴더 기준 입력/출력 경로
+    # I/O paths relative to project root
     mesh_in_path: str = "data/meshes/bonsai_pot.ply"
     mesh_out_path: str = "out/meshes/refined_bonsai_pot.obj"
     mesh_dev_path: str = "out/meshes/processed_bonsai_pot.obj"
 
-    # 기능 활성화 플래그
-    automatic_alignment: bool = True  # True: 시작 시 PCA로 바닥면을 자동 정렬
-    step_by_step_visualization: bool = True  # True: 각 단계별로 결과물을 시각화
+    # Feature flags
+    automatic_alignment: bool = True  # True: auto-align bottom via PCA at start
+    step_by_step_visualization: bool = True  # True: visualize each step
 
-    # --- [추가] 초기 클리닝 파라미터 ---
-    # 메인 메쉬의 대각선 길이 대비 % 크기로, 이보다 작은 조각들을 제거합니다.
-    # 예: 1.0은 1%보다 작은 모든 고립된 조각을 제거합니다.
+    # --- [Added] initial cleanup params ---
+    # Remove pieces smaller than this % of the main mesh diagonal.
+    # e.g. 1.0 removes all isolated pieces under 1%.
     initial_cleanup_threshold: float = 1.0
 
     # --------------------------------------------------------------------------
-    # 2. 자동 생성 경로 (수정 불필요)
+    # 2. Derived paths (do not edit)
     # --------------------------------------------------------------------------
     root_dir: str = field(default_factory=os.getcwd, init=False)
     mesh_in_dir: str = field(init=False)
@@ -44,11 +44,11 @@ class MeshRefinementConfig:
 
 
 # ============================================================================
-# 루프 찾기 및 자동 정렬 함수 (최종 검증 버전)
+# Loop finding and auto-alignment (final verified version)
 # ============================================================================
 
 def find_boundary_loops(t_mesh):
-    # (이 함수는 제공해주신 코드와 동일하게 유지됩니다)
+    # (kept identical to provided code)
     edges = t_mesh.edges_sorted
     unique_edges, inverse, counts = np.unique(edges, axis=0, return_inverse=True, return_counts=True)
     boundary_edges = unique_edges[counts == 1]
@@ -83,13 +83,13 @@ def find_boundary_loops(t_mesh):
 
 
 def calculate_transforms(ms):
-    # (이 함수는 제공해주신 코드와 동일하게 유지됩니다)
-    print("원본 메쉬에서 정렬을 위한 변환 행렬을 계산합니다...")
+    # (kept identical to provided code)
+    print("Computing alignment transform from original mesh...")
     current_mesh = ms.current_mesh()
     t_mesh = trimesh.Trimesh(vertices=current_mesh.vertex_matrix(), faces=current_mesh.face_matrix())
     loops_indices = find_boundary_loops(t_mesh)
     if not loops_indices:
-        print("경고: 경계 루프가 없어 변환 행렬을 계산할 수 없습니다.")
+        print("Warning: no boundary loop; cannot compute transform.")
         return None, None
 
     print(f"# loops: {len(loops_indices)}")
@@ -102,7 +102,7 @@ def calculate_transforms(ms):
     if np.dot(plane_normal, loop_verts.mean(axis=0) - t_mesh.centroid) < 0:
         plane_normal *= -1
 
-    # --- 여기가 사용자께서 제공해주신, 작동이 확인된 코드로 교체된 부분 ---
+    # --- Replaced with user-provided, verified code ---
     target_normal = np.array([0., 0., 1.])
     v = np.cross(plane_normal, target_normal)
     s = np.linalg.norm(v)
@@ -113,13 +113,13 @@ def calculate_transforms(ms):
     else:
         vx = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
         rotation_matrix = np.eye(3) + vx + vx.dot(vx) * ((1 - c) / (s ** 2))
-    # --- 교체 끝 ---
+    # --- End replacement ---
 
-    # 가상으로 회전시켜 Z 이동값 계산
+    # Rotate virtually to get Z offset
     rotated_loop_verts = loop_verts @ rotation_matrix.T
     z_mean = rotated_loop_verts[:, 2].mean()
 
-    # Forward 변환 행렬 (회전 + 이동) 생성
+    # Forward transform (rotation + translation)
     translation_matrix = np.eye(4)
     translation_matrix[2, 3] = z_mean
 
@@ -130,12 +130,12 @@ def calculate_transforms(ms):
 
     inverse_transform = np.linalg.inv(forward_transform)
 
-    print("Forward 및 Inverse 변환 행렬 계산 완료.")
+    print("Forward and inverse transforms computed.")
     return forward_transform, inverse_transform
 
 
 def apply_transform_from_matrix(ms, matrix_4x4):
-    # (이 함수는 제공해주신 코드와 동일하게 유지됩니다)
+    # (kept identical to provided code)
     rotation_matrix = matrix_4x4[:3, :3]
     translation_vector = matrix_4x4[:3, 3]
 
@@ -156,12 +156,12 @@ def apply_transform_from_matrix(ms, matrix_4x4):
 
 
 def show_mesh(mesh_set, title="Intermediate Step", enabled=True):
-    # (이 함수는 제공해주신 코드와 동일하게 유지됩니다)
+    # (kept identical to provided code)
     if not enabled or mesh_set.mesh_number() == 0:
         if not enabled:
-            print(f"[{title}] 시각화 비활성화됨. 건너뜁니다.")
+            print(f"[{title}] Visualization disabled. Skipping.")
         return
-    print(f"[{title}] 결과를 시각화합니다...")
+    print(f"[{title}] Visualizing result...")
     current_mesh = ms.current_mesh()
     o3d_mesh = o3d.geometry.TriangleMesh(
         o3d.utility.Vector3dVector(current_mesh.vertex_matrix()),
@@ -173,15 +173,15 @@ def show_mesh(mesh_set, title="Intermediate Step", enabled=True):
 
 
 def show_mesh_with_cutting_plane(ms, title, cut_z_value, enabled=True):
-    """메쉬, 좌표축, 그리고 지정된 Z 위치의 절단 평면을 함께 시각화합니다."""
+    """Visualize mesh, axes, and a cutting plane at given Z."""
     if not enabled or ms.mesh_number() == 0:
         if not enabled:
-            print(f"[{title}] 시각화 비활성화됨. 건너뜁니다.")
+            print(f"[{title}] Visualization disabled. Skipping.")
         return
 
-    print(f"[{title}] 메쉬, 좌표축, 절단 평면(z={cut_z_value})을 시각화합니다...")
+    print(f"[{title}] Visualizing mesh, axes, cutting plane (z={cut_z_value})...")
 
-    # 1. 메쉬 준비
+    # 1. Mesh
     current_mesh = ms.current_mesh()
     o3d_mesh = o3d.geometry.TriangleMesh(
         o3d.utility.Vector3dVector(current_mesh.vertex_matrix()),
@@ -190,12 +190,12 @@ def show_mesh_with_cutting_plane(ms, title, cut_z_value, enabled=True):
     o3d_mesh.compute_vertex_normals()
     o3d_mesh.paint_uniform_color([0.7, 0.7, 0.7])
 
-    # 2. 좌표축 준비
+    # 2. Axes
     mesh_bounds = o3d_mesh.get_axis_aligned_bounding_box()
     axis_size = max(mesh_bounds.get_extent()) * 0.5
     coord_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=axis_size, origin=[0, 0, 0])
 
-    # 3. 절단 평면 준비
+    # 3. Cutting plane
     bounds_extent = mesh_bounds.get_extent()
     plane_width = bounds_extent[0] * 1.2
     plane_height = bounds_extent[1] * 1.2
@@ -212,7 +212,7 @@ def show_mesh_with_cutting_plane(ms, title, cut_z_value, enabled=True):
     )
     plane.paint_uniform_color([1, 0, 0])
 
-    # 4. 함께 시각화
+    # 4. Show together
     o3d.visualization.draw_geometries(
         [o3d_mesh, coord_frame, plane],
         window_name=title
@@ -221,22 +221,22 @@ def show_mesh_with_cutting_plane(ms, title, cut_z_value, enabled=True):
 
 def flatten_bottom_hole_with_trimesh(ms: pymeshlab.MeshSet, target_z: float = 0.0) -> pymeshlab.MeshSet:
     """
-    Pymeshlab MeshSet을 받아, 가장 큰 경계 루프의 정점들을 지정된 Z 평면으로 이동시킨다.
+    Move vertices of the largest boundary loop onto the given Z plane.
     """
-    print("Trimesh를 사용하여 경계 루프 평면화 시작...")
+    print("Flattening boundary loop with Trimesh...")
     current_mesh = ms.current_mesh()
     t_mesh = trimesh.Trimesh(vertices=current_mesh.vertex_matrix(), faces=current_mesh.face_matrix())
 
     loops_indices = find_boundary_loops(t_mesh)
     if not loops_indices:
-        print("경고: 경계 루프를 찾지 못해 평면화 작업을 건너뜁니다.")
+        print("Warning: no boundary loop found; skipping flattening.")
         return ms
 
     largest_loop_indices = max(loops_indices, key=len)
-    print(f"가장 큰 경계 루프({len(largest_loop_indices)}개의 정점)를 찾았습니다.")
+    print(f"Found largest boundary loop ({len(largest_loop_indices)} vertices).")
 
     t_mesh.vertices[largest_loop_indices, 2] = target_z
-    print(f"경계 루프의 모든 정점을 Z={target_z} 평면으로 투영(이동)했습니다.")
+    print(f"Projected all boundary loop vertices to Z={target_z}.")
 
     new_ms = pymeshlab.MeshSet()
     new_ms.add_mesh(pymeshlab.Mesh(vertex_matrix=t_mesh.vertices, face_matrix=t_mesh.faces))
@@ -245,13 +245,13 @@ def flatten_bottom_hole_with_trimesh(ms: pymeshlab.MeshSet, target_z: float = 0.
 
 def fill_bottom_hole_constrained(ms: pymeshlab.MeshSet) -> pymeshlab.MeshSet:
     """
-    Pymeshlab MeshSet을 받아, 가장 큰 경계 루프를 찾아 고품질의 평면으로 해당 구멍을 메운다.
+    Fill the largest boundary loop hole with a clean planar patch.
     """
-    print("Shapely와 Trimesh를 사용하여 '경계 제약 삼각분할'로 바닥 구멍 메우기를 시작합니다...")
+    print("Filling bottom hole via constrained triangulation (Shapely + Trimesh)...")
     try:
         from shapely.geometry import Polygon
     except ImportError:
-        print("\n오류: 'shapely' 라이브러리가 필요합니다. 터미널에서 'pip install shapely'를 실행해주세요.")
+        print("\nError: 'shapely' required. Run 'pip install shapely'.")
         raise
 
     current_mesh = ms.current_mesh()
@@ -259,10 +259,10 @@ def fill_bottom_hole_constrained(ms: pymeshlab.MeshSet) -> pymeshlab.MeshSet:
 
     loops = find_boundary_loops(t_mesh)
     if not loops:
-        print("경고: 메울 구멍(경계 루프)이 없습니다.")
+        print("Warning: no hole (boundary loop) to fill.")
         return ms
     largest_loop_indices = max(loops, key=len)
-    print(f"가장 큰 경계 루프({len(largest_loop_indices)}개의 정점)를 찾았습니다.")
+    print(f"Found largest boundary loop ({len(largest_loop_indices)} vertices).")
 
     loop_verts_3d = t_mesh.vertices[largest_loop_indices]
     loop_verts_2d = loop_verts_3d[:, :2]
@@ -279,7 +279,7 @@ def fill_bottom_hole_constrained(ms: pymeshlab.MeshSet) -> pymeshlab.MeshSet:
     t_mesh.faces = np.vstack([t_mesh.faces, new_faces_offset])
 
     t_mesh.merge_vertices()
-    print(f"{len(new_faces)}개의 새로운 면을 추가하여 구멍을 메웠습니다.")
+    print(f"Filled hole with {len(new_faces)} new faces.")
 
     new_ms = pymeshlab.MeshSet()
     new_ms.add_mesh(pymeshlab.Mesh(vertex_matrix=t_mesh.vertices, face_matrix=t_mesh.faces))
@@ -288,23 +288,23 @@ def fill_bottom_hole_constrained(ms: pymeshlab.MeshSet) -> pymeshlab.MeshSet:
 
 def run_refinement_pipeline(ms, cfg, forward_transform=None, inverse_transform=None):
     """
-    전체 후처리 파이프라인. (고품질 바닥 생성 + 나머지 구멍 메우기)
+    Full post-processing pipeline (clean bottom + fill remaining holes).
     """
-    print("\n후처리 파이프라인을 시작합니다...")
-    show_mesh_with_cutting_plane(ms, "Step 0: 외모 check Plane", 0, enabled=cfg.step_by_step_visualization)
+    print("\nStarting post-processing pipeline...")
+    show_mesh_with_cutting_plane(ms, "Step 0: Appearance check Plane", 0, enabled=cfg.step_by_step_visualization)
 
     if forward_transform is not None:
-        print("\n[단계 1] 계산된 변환을 적용하여 메쉬를 정렬합니다...")
+        print("\n[Step 1] Aligning mesh with computed transform...")
         apply_transform_from_matrix(ms, forward_transform)
         show_mesh_with_cutting_plane(ms, "Step 1: After Alignment", 0, enabled=cfg.step_by_step_visualization)
 
-    print("\n[단계 2] Screened Poisson 표면 재구성 실행 중...")
+    print("\n[Step 2] Running Screened Poisson reconstruction...")
     ms.generate_surface_reconstruction_screened_poisson(depth=8, fulldepth=8, preclean=True)
     show_mesh(ms, title="Step 2: After Poisson Reconstruction", enabled=cfg.step_by_step_visualization)
 
     if forward_transform is not None:
         cutting_plane_z = -1e-6
-        print(f"\n[단계 3] 바닥면을 잘라냅니다...")
+        print(f"\n[Step 3] Cutting bottom...")
         show_mesh_with_cutting_plane(ms, "Step 3: Preview Cutting Plane", cutting_plane_z,
                                      enabled=cfg.step_by_step_visualization)
 
@@ -313,48 +313,48 @@ def run_refinement_pipeline(ms, cfg, forward_transform=None, inverse_transform=N
             ms.meshing_remove_selected_vertices()
         show_mesh(ms, title="Step 3: After Cutting Bottom", enabled=cfg.step_by_step_visualization)
 
-    print("\n[단계 4] 메쉬 단순화 ...")
+    print("\n[Step 4] Simplifying mesh ...")
     ms.meshing_decimation_quadric_edge_collapse(targetfacenum=20000, preservenormal=True)
     show_mesh(ms, title="Step 4: After Simplification", enabled=cfg.step_by_step_visualization)
 
-    print("\n[단계 5] 메쉬 리메싱 ...")
+    print("\n[Step 5] Remeshing ...")
     ms.meshing_isotropic_explicit_remeshing(targetlen=pymeshlab.PercentageValue(1))
     show_mesh(ms, title="Step 5: After Remeshing", enabled=cfg.step_by_step_visualization)
 
-    print("\n[단계 6] 1차 비다양체 복구 ...")
+    print("\n[Step 6] 1st non-manifold repair ...")
     ms.meshing_repair_non_manifold_edges()
     ms.meshing_merge_close_vertices()
     show_mesh(ms, title="Step 6: After 1st Repair", enabled=cfg.step_by_step_visualization)
 
     if forward_transform is not None:
-        print("\n[단계 7] Trimesh를 사용하여 바닥 경계 루프를 z=0 평면으로 이동...")
+        print("\n[Step 7] Moving bottom boundary loop to z=0 (Trimesh)...")
         ms = flatten_bottom_hole_with_trimesh(ms, target_z=0.0)
         show_mesh(ms, title="Step 7: After Flattening Boundary Loop", enabled=cfg.step_by_step_visualization)
 
-        print("\n[단계 8] '경계 제약 삼각분할'로 바닥면 구멍을 메웁니다...")
+        print("\n[Step 8] Filling bottom hole via constrained triangulation...")
         ms = fill_bottom_hole_constrained(ms)
         show_mesh(ms, title="Step 8: After Constrained Fill", enabled=cfg.step_by_step_visualization)
 
-        print("\n[단계 8.5] 중간 비다양체(Non-Manifold) 복구/정리 중...")
+        print("\n[Step 8.5] Mid non-manifold repair/cleanup...")
         ms.meshing_repair_non_manifold_edges()
         ms.meshing_merge_close_vertices()
         show_mesh(ms, title="Step 8.5: After Mid-Repair", enabled=cfg.step_by_step_visualization)
 
-    print("\n[단계 9] 남아있는 다른 구멍들을 메웁니다...")
+    print("\n[Step 9] Filling remaining holes...")
     ms.meshing_close_holes(maxholesize=5000)
     show_mesh(ms, title="Step 9: After Filling Other Holes", enabled=cfg.step_by_step_visualization)
 
-    print("\n[단계 10] 최종 비다양체(Non-Manifold) 복구/정리 중...")
+    print("\n[Step 10] Final non-manifold repair/cleanup...")
     ms.meshing_repair_non_manifold_edges()
     ms.meshing_merge_close_vertices()
     show_mesh(ms, title="Step 10: After Final Repair", enabled=cfg.step_by_step_visualization)
 
     if inverse_transform is not None:
-        print("\n[단계 11] 최종 메쉬를 원래 좌표계로 복원합니다...")
+        print("\n[Step 11] Restoring final mesh to original frame...")
         apply_transform_from_matrix(ms, inverse_transform)
         show_mesh(ms, title="Step 11: After Reverting Transform", enabled=cfg.step_by_step_visualization)
 
-    print(f"\n최종 메쉬를 '{cfg.mesh_out_dir}'에 저장 중...")
+    print(f"\nSaving final mesh to '{cfg.mesh_out_dir}'...")
     os.makedirs(os.path.dirname(cfg.mesh_out_dir), exist_ok=True)
     ms.save_current_mesh(cfg.mesh_out_dir)
 
@@ -365,7 +365,7 @@ if __name__ == "__main__":
     try:
         ms.load_new_mesh(cfg.mesh_in_dir)
     except pymeshlab.PyMeshLabException:
-        print(f"경고: '{cfg.mesh_in_path}'를 찾을 수 없어 테스트용 메쉬를 생성합니다.")
+        print(f"Warning: '{cfg.mesh_in_path}' not found; generating test mesh.")
         trimesh.creation.bowl().export(cfg.mesh_in_dir)
         ms.load_new_mesh(cfg.mesh_in_dir)
 
@@ -373,16 +373,16 @@ if __name__ == "__main__":
         if cfg.step_by_step_visualization:
             show_mesh(ms, title="Step 0: Original Mesh")
 
-        # --- [추가된 부분] 초기 클리닝 단계 ---
-        # 본격적인 처리를 시작하기 전에, 작고 연결되지 않은 조각들(떠다니는 노이즈)을 제거합니다.
-        # 이 단계는 파이프라인의 안정성을 크게 향상시킵니다.
-        print("\n[단계 0.5] 작은 고립된 조각들을 제거합니다...")
+        # --- [Added] initial cleanup ---
+        # Remove small disconnected pieces (floating noise) before processing.
+        # Greatly improves pipeline stability.
+        print("\n[Step 0.5] Removing small isolated pieces...")
         ms.meshing_remove_connected_component_by_diameter(
             mincomponentdiag=pymeshlab.PercentageValue(20.0)
         )
         show_mesh(ms, title="Step 0.5: After Initial Cleaning", enabled=cfg.step_by_step_visualization)
 
-        # --- [수정 끝] ---
+        # --- [End edit] ---
 
         forward_transform, inverse_transform = None, None
         if cfg.automatic_alignment:
@@ -393,6 +393,6 @@ if __name__ == "__main__":
         else:
             run_refinement_pipeline(ms, cfg)
 
-        print("\n모든 과정이 완료되었습니다.")
+        print("\nAll done.")
     else:
-        print("\n메쉬를 로드하지 못해 처리를 시작할 수 없습니다.")
+        print("\nFailed to load mesh; cannot start processing.")

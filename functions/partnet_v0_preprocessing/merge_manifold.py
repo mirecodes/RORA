@@ -17,14 +17,14 @@ OUTPUT_DIR = os.path.join(ROOT, "data", "objects")                   # <name>/me
 
 
 def merge_urdf_manifold_ply(urdf_path, joint_cfg, output_path="fused_mesh.ply"):
-    print(f"[Info] URDF 로드 중: {urdf_path}")
+    print(f"[Info] Loading URDF: {urdf_path}")
     robot = URDF.load(urdf_path)
 
-    # 1. Joint Configuration 적용
+    # 1. Apply joint configuration
     valid_cfg = {k: v for k, v in joint_cfg.items() if k in robot.actuated_joint_names}
     robot.update_cfg(configuration=valid_cfg)
 
-    # 2. Scene 객체 가져오기 (수정된 로직)
+    # 2. Get scene
     scene = robot.scene
 
     manifolds = []
@@ -35,24 +35,24 @@ def merge_urdf_manifold_ply(urdf_path, joint_cfg, output_path="fused_mesh.ply"):
         mesh.apply_transform(transform)
 
         try:
-            # Watertight 체크 및 수리
+            # Watertight check and repair
             if not mesh.is_watertight:
-                # print(f"[Warning] '{name}' 메쉬가 닫혀있지 않아 구멍을 메웁니다.")
+                # print(f"[Warning] '{name}' not watertight, filling holes.")
                 mesh.fill_holes()
                 if not mesh.is_watertight:
-                    print(f"  -> '{name}' 수리 실패. Convex Hull로 대체합니다.")
+                    print(f"  -> '{name}' repair failed. Using convex hull.")
                     mesh = mesh.convex_hull
 
-            # 유효성 검사
+            # Validity check
             if mesh.is_empty:
-                print(f"  -> [Skip] '{name}' 메쉬가 비어있습니다 (is_empty).")
+                print(f"  -> [Skip] '{name}' mesh is empty (is_empty).")
                 continue
             
             if len(mesh.vertices) < 3 or len(mesh.faces) < 1:
-                print(f"  -> [Skip] '{name}' 메쉬 데이터 부족 (V={len(mesh.vertices)}, F={len(mesh.faces)}).")
+                print(f"  -> [Skip] '{name}' too few elements (V={len(mesh.vertices)}, F={len(mesh.faces)}).")
                 continue
 
-            # --- Trimesh -> Manifold 변환 (수정된 로직) ---
+            # --- Trimesh -> Manifold ---
             verts = np.array(mesh.vertices, dtype=np.float32)
             faces = np.array(mesh.faces, dtype=np.int32)
             
@@ -60,56 +60,56 @@ def merge_urdf_manifold_ply(urdf_path, joint_cfg, output_path="fused_mesh.ply"):
             m_obj = m3d.Manifold(m_mesh)
             
             if m_obj.num_vert() == 0:
-                print(f"  -> [Skip] '{name}' Manifold 변환 결과가 비어있습니다.")
+                print(f"  -> [Skip] '{name}' Manifold conversion is empty.")
                 continue
 
             manifolds.append(m_obj)
             # ------------------------------------------------
 
         except Exception as e:
-            print(f"[Error] '{name}' 변환 실패: {e}")
+            print(f"[Error] '{name}' conversion failed: {e}")
 
     if not manifolds:
-        print("[Error] 병합할 유효한 메쉬가 없습니다.")
+        print("[Error] No valid meshes to merge.")
         return None
 
-    print(f"[Info] {len(manifolds)}개의 파츠를 Boolean Union으로 결합합니다...")
+    print(f"[Info] Boolean union of {len(manifolds)} parts...")
 
-    # 3. Boolean Union 수행
+    # 3. Boolean union
     combined_manifold = manifolds[0]
     for i in range(1, len(manifolds)):
         try:
             combined_manifold += manifolds[i]
         except Exception as e:
-            print(f"[Warning] 병합 중 에러 발생 (index {i}): {e}")
+            print(f"[Warning] Merge error (index {i}): {e}")
 
     if combined_manifold.num_vert() == 0:
-        print("[Error] 최종 병합 결과가 비어있습니다 (Vertices=0).")
+        print("[Error] Merged result is empty (Vertices=0).")
         return None
 
-    # 4. 결과물 변환 및 PLY 저장 설정
+    # 4. Convert result for PLY export
     out_mesh = combined_manifold.to_mesh()
     final_trimesh = trimesh.Trimesh(
         vertices=np.array(out_mesh.vert_properties),
         faces=np.array(out_mesh.tri_verts)
     )
 
-    # [중요] PLY 출력을 위해 법선(Normal) 재계산 (부드러운 쉐이딩을 위해)
+    # [Important] Recompute normals for PLY output (smooth shading)
     final_trimesh.fix_normals()
 
     if final_trimesh.is_watertight:
-        print("[Success] 완벽한 Watertight Mesh가 생성되었습니다.")
+        print("[Success] Watertight mesh created.")
     else:
-        print(f"[Warning] 결과 메쉬가 Watertight하지 않습니다. (V={len(final_trimesh.vertices)}, F={len(final_trimesh.faces)})")
+        print(f"[Warning] Result mesh is not watertight. (V={len(final_trimesh.vertices)}, F={len(final_trimesh.faces)})")
 
     if final_trimesh.is_empty:
-         print("[Error] 최종 Trimesh가 비어있습니다.")
+         print("[Error] Final trimesh is empty.")
          return None
 
-    # PLY로 내보내기 (binary=True는 파일 용량을 줄임, 텍스트로 보려면 False)
+    # Export PLY (binary is smaller; use ascii to read as text)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     final_trimesh.export(output_path, file_type='ply', encoding='binary')
-    print(f"[Info] 저장 완료: {output_path}")
+    print(f"[Info] Saved: {output_path}")
     return final_trimesh
 
 

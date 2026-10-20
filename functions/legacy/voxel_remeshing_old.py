@@ -5,15 +5,15 @@ import os
 
 
 def merge_urdf_voxel_ply(urdf_path, joint_cfg, output_path="fused_voxel.ply", voxel_pitch=0.005):
-    print(f"[Info] URDF 로드 중: {urdf_path}")
+    print(f"[Info] Loading URDF: {urdf_path}")
     robot = URDF.load(urdf_path)
 
-    # 1. Configuration 적용
+    # 1. Apply configuration
     joint_cfg_rad = {k: np.deg2rad(v) for k, v in joint_cfg.items()}
     valid_cfg = {k: v for k, v in joint_cfg_rad.items() if k in robot.actuated_joint_names}
     robot.update_cfg(configuration=valid_cfg)
 
-    # 2. Scene 객체 가져오기
+    # 2. Get scene
     scene = robot.scene
     all_meshes = []
 
@@ -26,37 +26,37 @@ def merge_urdf_voxel_ply(urdf_path, joint_cfg, output_path="fused_voxel.ply", vo
     if not all_meshes:
         return None
 
-    print("[Info] 메쉬들을 하나의 덩어리로 뭉칩니다 (Concatenate)...")
+    print("[Info] Concatenating meshes into one...")
     combined_raw = trimesh.util.concatenate(all_meshes)
 
     # 3. Voxelization & Remeshing
-    print(f"[Info] 복셀화 및 재구성 진행 중 (Pitch: {voxel_pitch}m)...")
+    print(f"[Info] Voxelizing and reconstructing (Pitch: {voxel_pitch}m)...")
 
     try:
         voxel_grid = combined_raw.voxelized(pitch=voxel_pitch)
         voxel_grid.fill()
         final_mesh = voxel_grid.marching_cubes
 
-        # 표면 부드럽게 만들기 (Laplacian Smoothing)
+        # Smooth surface (Laplacian)
         trimesh.smoothing.filter_laplacian(final_mesh, iterations=2)
 
-        # [중요] PLY 출력을 위한 법선 계산
+        # [Important] Compute normals for PLY
         final_mesh.fix_normals()
 
         if final_mesh.is_watertight:
-            print("[Success] Watertight Mesh 생성 성공.")
+            print("[Success] Watertight mesh created.")
 
-        # PLY로 내보내기
+        # Export PLY
         final_mesh.export(output_path, file_type='ply', encoding='binary')
-        print(f"[Info] 저장 완료: {output_path}")
+        print(f"[Info] Saved: {output_path}")
         return final_mesh
 
     except Exception as e:
-        print(f"[Error] 복셀화 과정 실패: {e}")
+        print(f"[Error] Voxelization failed: {e}")
         return None
 
 
-# --- 실행 예시 ---
+# --- Example ---
 if __name__ == "__main__":
     my_urdf = "urdf/toilet/mobility.urdf"
     my_config = {
@@ -69,5 +69,5 @@ if __name__ == "__main__":
     import os
 
     if os.path.exists(my_urdf):
-        # 5mm 해상도로 복셀화
+        # Voxelize at 5mm
         merge_urdf_voxel_ply(my_urdf, my_config, voxel_pitch=0.005)

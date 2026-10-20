@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """
 Lightweight URDF parser + FK (no external URDF libs).
-- xml.etree.ElementTree 로 파싱
-- rpy(origin), axis, limit(lower/upper) 지원
+- Parsed with xml.etree.ElementTree
+- Supports rpy(origin), axis, limit(lower/upper)
 - joint types: fixed, revolute, continuous, prismatic
-- FK: 링크별 월드변환 4x4 반환
-- 미지원(간단화): mimic, calibration, dynamics, safety_controller 등
+- FK: per-link 4x4 world transforms
+- Unsupported: mimic, calibration, dynamics, safety_controller, etc.
 
 Author: you
 """
@@ -229,21 +229,21 @@ class URDFParser:
 
 
     def parent_link_of(self, child_link: str) -> Optional[str]:
-        """child_link의 부모 링크명 반환 (루트면 None)."""
+        """Parent link name of child_link (None if root)."""
         jname = self.model.child_to_joint.get(child_link)
         if not jname:
             return None
         return self.model.joints[jname].parent
 
     def relative_transform(self, parent_link: str, child_link: str, q: Dict[str, float]) -> np.ndarray:
-        """T_parent->child (FK에서 얻어 계산)."""
+        """T_parent->child (computed from FK)."""
         T_world = self.link_transforms(q)
         if parent_link not in T_world or child_link not in T_world:
             raise KeyError(f"relative_transform: missing link(s): {parent_link}, {child_link}")
         return _inv(T_world[parent_link]) @ T_world[child_link]
 
     def joint_path_to(self, link_name: str):
-        """root(해당 링크의 뿌리) → link_name 으로 내려오는 JointSpec 리스트를 반환."""
+        """JointSpec list from the link's root down to link_name."""
         path = []
         cur = link_name
         while cur in self.model.child_to_joint:

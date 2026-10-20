@@ -263,14 +263,14 @@ def train_polyhedral_planes(
 
 def margin_score(clf, Xs, y):
     """
-    clf: 학습된 SVM (LinearSVC or SVC)
-    Xs: scaler로 변환된 feature
-    y: {+1, -1} 라벨
+    clf: trained SVM (LinearSVC or SVC)
+    Xs: scaled features
+    y: {+1, -1} labels
     """
     scores = clf.decision_function(Xs)
-    margins = y * scores   # >0: 올바른 분류, <0: 오분류
+    margins = y * scores   # >0: correct, <0: misclassified
     clipped_margins = np.clip(margins, 0, None) # or np.clip(margins, 0, None)
-    # 평균 margin을 점수로 사용 (음수면 패널티)
+    # Score = mean margin (negative = penalty)
     return np.mean(margins)
 
 
@@ -325,7 +325,7 @@ def learn_separator_main(
     #     categories=categories,
     #     idx_part=idx_part,
     #     loops=loops,
-    #     boundary_indices=boundary_indices,  # ← 함께 표시
+    #     boundary_indices=boundary_indices,  # ← overlay too
     #     show_original_mesh=True,
     #     tube_radius=0.010,
     #     sphere_radius=0.005,
@@ -509,12 +509,12 @@ def visualize_boundary_loops(
     idx_part: int,
     loops: list[np.ndarray],
     *,
-    boundary_indices: np.ndarray | None = None,  # ★ 추가: 경계 정점 인덱스
+    boundary_indices: np.ndarray | None = None,  # ★ added: boundary vertex indices
     show_original_mesh: bool = True,
     tube_radius: float = 0.4,
     sphere_radius: float = 0.8,
-    boundary_point_size: float = 6.0,           # ★ 추가: 경계 포인트 크기
-    boundary_point_color = "black",             # ★ 추가: 경계 포인트 색
+    boundary_point_size: float = 6.0,           # ★ added: boundary point size
+    boundary_point_color = "black",             # ★ added: boundary point color
     background: str = "white",
 ):
     """
@@ -564,14 +564,14 @@ def visualize_boundary_loops(
         s = vedo.Sphere(pos=center, r=sphere_radius, res=16).c(cmap[i]).alpha(0.5)
         actors.append(s)
 
-    # 4) boundary indices → 확실히 보이도록 Spheres 글리프로
+    # 4) boundary indices → Spheres glyphs for visibility
     if boundary_indices is not None and len(boundary_indices) > 0:
         bi = np.asarray(boundary_indices, int)
         bi = bi[(bi >= 0) & (bi < verts.shape[0])]
         if bi.size > 0:
-            # 빨간 구로 또렷하게
+            # red spheres for clarity
             dots = vedo.Spheres(verts[bi], r=boundary_point_size, c="red", alpha=1.0)
-            # 포인트가 표면에 파묻혀 보여도 구는 확실히 보입니다.
+            # spheres stay visible even where points sink into the surface
             actors.append(dots)
 
     # 5) axes & show

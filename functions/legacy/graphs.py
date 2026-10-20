@@ -26,7 +26,7 @@ def classify_vertices(
     use_signed_dist: bool = True,
     sdf_thresh: float = 0.0,
     batch_size: int = 50000,
-    k_vote: int = 3,                      # <- 추가: 최근접 이웃 개수
+    k_vote: int = 3,                      # <- added: number of nearest neighbors
 ) -> np.ndarray:
     # TODO: Improve the classification algorithm
     V = len(verts)
@@ -87,7 +87,7 @@ def classify_vertices(
                         vert_label[take[upd]] = cid
 
     # ------------------------------
-    # (NEW) 최근접 k개 라벨-정점 투표 보정
+    # (NEW) k-nearest labeled-vertex vote fill-in
     # ------------------------------
     unlabeled = np.where(vert_label == -1)[0]
     if unlabeled.size == 0:
@@ -95,19 +95,19 @@ def classify_vertices(
 
     labeled = np.where(vert_label >= 0)[0]
     if labeled.size == 0:
-        # 라벨 있는 정점이 전혀 없으면 보정 불가
+        # No labeled vertices: cannot fill in
         return vert_label
 
     k = int(min(k_vote, labeled.size))
 
     def vote_assign(u_idx: np.ndarray, nn_idx: np.ndarray, nn_dist: np.ndarray) -> np.ndarray:
         """
-        u_idx: (M,) 미분류 정점 인덱스
-        nn_idx: (M,k) labeled 배열 내 인덱스(로컬 인덱스)
-        nn_dist: (M,k) 거리
-        반환: (M,) 할당 라벨
+        u_idx: (M,) unlabeled vertex indices
+        nn_idx: (M,k) indices into `labeled` (local)
+        nn_dist: (M,k) distances
+        Returns: (M,) assigned labels
         """
-        # 로컬 인덱스를 글로벌 정점 인덱스로 변환
+        # Local -> global vertex indices
         neigh_global = labeled[nn_idx]             # (M,k)
         neigh_labels = vert_label[neigh_global]    # (M,k)
         out = np.full(u_idx.shape[0], -1, dtype=np.int32)
@@ -115,15 +115,15 @@ def classify_vertices(
         for m in range(u_idx.shape[0]):
             labs = neigh_labels[m]
             dists = nn_dist[m]
-            # 다수결
+            # Majority vote
             vals, cnts = np.unique(labs, return_counts=True)
-            # 최빈도 후보들
+            # Most frequent candidates
             maxc = np.max(cnts)
             cand = vals[cnts == maxc]
             if cand.size == 1:
                 out[m] = int(cand[0])
             else:
-                # 동표면 후보들 중 거리 합이 최소인 라벨 선택
+                # Tie: pick label with min distance sum
                 best_lab = None
                 best_sum = np.inf
                 for L in cand:
@@ -134,11 +134,11 @@ def classify_vertices(
                 out[m] = best_lab if best_lab is not None else int(cand[0])
         return out
 
-    # 우선 SciPy KDTree 시도
+    # Try SciPy KDTree first
     try:
         from scipy.spatial import cKDTree
         tree = cKDTree(verts[labeled])
-        # query 결과가 k==1이면 1D, 그 외 2D → 2D로 통일
+        # query returns 1D when k==1; normalize to 2D
         dists, idxs = tree.query(verts[unlabeled], k=k, workers=-1)
         if k == 1:
             dists = dists[:, None]
@@ -147,23 +147,23 @@ def classify_vertices(
         vert_label[unlabeled] = assign
         return vert_label
     except Exception:
-        # SciPy가 없거나 실패하면 배치 브루트포스(메모리 안전)
-        B = 8192  # 배치 크기
+        # Fallback: batched brute force (memory-safe)
+        B = 8192  # batch size
         for s in range(0, unlabeled.size, B):
             take = unlabeled[s:s+B]
             U = verts[take]                  # (b,3)
             L = verts[labeled]              # (L,3)
-            # 거리 제곱 (메모리 고려해 배치로 충분히 작게)
-            # b x L 행렬에서 각 행마다 k개 최솟값의 인덱스를 얻는다
-            # numpy.argpartition 사용
-            # (b, L) 거리 계산
+            # Squared distances (batched to bound memory)
+            # Per row of b x L, get indices of k smallest
+            # via numpy.argpartition
+            # (b, L) distances
             # (U - L)^2 = |U|^2 + |L|^2 - 2 U·L
             UU = np.sum(U*U, axis=1, keepdims=True)         # (b,1)
             LL = np.sum(L*L, axis=1, keepdims=True).T       # (1,L)
             d2 = UU + LL - 2.0 * (U @ L.T)                  # (b,L)
-            # k개 이웃의 로컬 인덱스
-            part = np.argpartition(d2, kth=k-1, axis=1)[:, :k]  # (b,k) 순서는 정렬X
-            # 해당 거리 추출 후 정렬
+            # Local indices of k neighbors
+            part = np.argpartition(d2, kth=k-1, axis=1)[:, :k]  # (b,k) unsorted
+            # Gather distances and sort
             row_idx = np.arange(part.shape[0])[:, None]
             dsel = d2[row_idx, part]
             order = np.argsort(dsel, axis=1)
@@ -407,7 +407,7 @@ def identify_loop_neighbor(
     for u in loop:
         for v in adj[u]:
             l_v = int(vert_label[v])
-            # 0(배경)이나 자기 자신(parent)은 제외하고 카운트
+            # Count, excluding 0 (background) and self (parent)
             if l_v > 0 and l_v != parent_label:
                 counts[l_v] += 1
     if not counts:
@@ -560,48 +560,48 @@ def cluster_reciprocal_loop_pairs(
     *,
     w_pos: float = 1.0,
     w_ang: float = 0.5,
-    cost_max: float | None = None,  # 매칭 허용 상한(선택)
+    cost_max: float | None = None,  # optional max matching cost
 ) -> List[Dict]:
     """
-    results: learn_separator_main per-loop 결과 리스트.
-      각 원소는 최소한 아래 키를 가짐:
+    results: per-loop results from learn_separator_main.
+      Each item has at least:
         - 'parent': int, 'child': int
         - 'center': (3,), 'pca_normal': (3,)
-        - (원하면 'loop' 등 원본 식별자를 그대로 유지)
-    반환: RLP(상호 루프쌍) 리스트. 각 항목 구조:
+        - (other identifiers like 'loop' are kept as-is)
+    Returns: list of RLPs (reciprocal loop pairs), each:
       {
-        'parts': (i, j),                     # 정렬된 파트쌍 (min, max)
-        'a': a_dict, 'b': b_dict,            # 대응된 원본 루프(방향 i->j, j->i)
-        'center': (3,),                      # 평균 center
-        'normal': (3,),                      # 방향 정합 후 평균 정규화
-        'cost': float,                       # 매칭 비용
+        'parts': (i, j),                     # sorted part pair (min, max)
+        'a': a_dict, 'b': b_dict,            # matched source loops (i->j, j->i)
+        'center': (3,),                      # mean center
+        'normal': (3,),                      # mean normal after sign alignment, normalized
+        'cost': float,                       # matching cost
       }
     """
-    # 1) 파트쌍 단위로 그룹핑 (무순서 쌍)
+    # 1) Group by unordered part pair
     buckets: Dict[Tuple[int, int], Dict[str, List[Dict]]] = {}
     for it in results:
         p, q = int(it["parent"]), int(it["child"])
         if p == q:
-            # 자기-루프는 건너뜀
+            # skip self-loops
             continue
         key = (p, q) if p < q else (q, p)
-        dir_key = "A" if (p < q) else "B"   # A: p->q (작은->큰), B: q->p (큰->작은)
+        dir_key = "A" if (p < q) else "B"   # A: p->q (small->large), B: q->p (large->small)
         if key not in buckets:
             buckets[key] = {"A": [], "B": []}
         buckets[key][dir_key].append(it)
 
     RLPs: List[Dict] = []
 
-    # 2) 각 파트쌍마다 최소 비용 매칭
+    # 2) Min-cost matching per part pair
     for (i, j), grp in buckets.items():
         A = grp["A"]  # i->j
         B = grp["B"]  # j->i
         if not A or not B:
-            continue  # 한쪽 방향만 있으면 매칭 불가
+            continue  # one direction only: cannot match
         C = _build_cost_matrix(A, B, w_pos=w_pos, w_ang=w_ang)
         pairs = _hungarian_or_greedy(C)
 
-        # 3) 페어 생성 (코스트 상한 필터)
+        # 3) Build pairs (cost cap filter)
         for ia, ib in pairs:
             cost = float(C[ia, ib])
             if (cost_max is not None) and (cost > cost_max):
@@ -611,7 +611,7 @@ def cluster_reciprocal_loop_pairs(
             cb = np.asarray(b["center"], dtype=float)
             na = _normalize(np.asarray(a["pca_normal"], dtype=float))
             nb = _normalize(np.asarray(b["pca_normal"], dtype=float))
-            # normal 방향 정합
+            # align normal signs
             if float(np.dot(na, nb)) < 0.0:
                 nb = -nb
             n_pair = _normalize(na + nb) if np.linalg.norm(na + nb) > 1e-9 else na
@@ -624,6 +624,6 @@ def cluster_reciprocal_loop_pairs(
                 "cost": cost,
             })
 
-    # 4) 정렬(코스트 오름차순) 또는 길이 등 다른 기준도 가능
+    # 4) Sort by cost ascending (other keys possible)
     RLPs.sort(key=lambda d: d["cost"])
     return RLPs
