@@ -16,6 +16,7 @@ from functions import stage_transform, stage_refine, stage_decompose, stage_segm
     restore_transform
 from functions.gui.runner import STAGE_ORDER
 from functions.utils.config import load_object, load_params
+from functions.visualize.style import set_vector_scale
 
 
 @dataclass
@@ -89,6 +90,7 @@ assert list(STAGE_FUNCS) == STAGE_ORDER
 
 def run_stage(cfgs: SystemConfigs, name: str) -> None:
     """Run one stage. Progress, interaction and timing go through functions.gui.bridge.ui()."""
+    set_vector_scale(cfgs.params.get("visualization", {}).get("vector_scale"))
     STAGE_FUNCS[name](cfgs)
 
 

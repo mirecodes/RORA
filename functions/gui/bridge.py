@@ -117,7 +117,7 @@ class UiBridge:
         self.timer = StageTimer(clock)
         self._stop = threading.Event()
         self._done = threading.Event()
-        self._result = None
+        self._result = self._error = None
 
     # --- runner side ---
     def begin_stage(self, name: str) -> None:
@@ -153,17 +153,24 @@ class UiBridge:
     def _block(self, kind: str, payload):
         self.check_stop()
         self._done.clear()
-        self._result = None
+        self._result = self._error = None
         t0 = self.timer.clock()
         self.post(kind, payload)
         self._done.wait()
         self.timer.add_wait(self.timer.clock() - t0)
         self.check_stop()
+        if self._error is not None:
+            raise RuntimeError(f"Scene failed on the GUI thread:\n{self._error}")
         return self._result
 
     # --- GUI side ---
     def resolve(self, result=None) -> None:
         self._result = result
+        self._done.set()
+
+    def fail(self, error: str) -> None:
+        """The scene could not be shown (e.g. build() raised): fail the waiting stage with `error`."""
+        self._error = error
         self._done.set()
 
     def request_stop(self) -> None:

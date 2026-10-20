@@ -163,6 +163,17 @@ def save_object_profile(params: dict, obj: dict, now: datetime | None = None) ->
     return stem
 
 
+def resolve_object_edit(prev: dict, edited: dict) -> dict:
+    """Object settings after an edit in the Object section. Picking a snapshot restores its object block;
+    changing the object or the shared profile drops the snapshot, which belongs to the old combination."""
+    stem = edited.get("object_profile") or None
+    if stem and stem != (prev.get("object_profile") or None):
+        return config.apply_object_profile(edited, stem)
+    if edited.get("object_name") != prev.get("object_name") or edited.get("profile") != prev.get("profile"):
+        stem = None
+    return dict(copy.deepcopy(edited), object_profile=stem)
+
+
 def list_object_profiles(object_name: str) -> list[str]:
     """Stems of saved profiles for `object_name`, newest first."""
     pattern = re.compile(rf"^{re.escape(object_name)}_\d{{8}}_\d{{6}}(_\d+)?$")

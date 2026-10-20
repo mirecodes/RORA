@@ -75,6 +75,19 @@ def test_stop_unblocks_waiting_worker():
     b.step("next")  # no longer stopped
 
 
+def test_gui_side_failure_fails_the_waiting_stage():
+    b = UiBridge(lambda kind, payload: None)
+    b.begin_stage("articulate")
+    threading.Timer(0.05, lambda: b.fail("Traceback: build exploded")).start()
+    try:
+        b.interact("scene")
+        raise AssertionError("expected RuntimeError")
+    except RuntimeError as e:
+        assert "build exploded" in str(e)
+    threading.Timer(0.05, lambda: b.resolve("ok")).start()
+    assert b.interact("scene") == "ok"  # the error does not leak into the next interaction
+
+
 def test_checkpoint_is_noop_unless_debug():
     events = []
     b = UiBridge(lambda kind, payload: events.append(kind))

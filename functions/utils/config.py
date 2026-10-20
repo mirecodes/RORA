@@ -1,3 +1,4 @@
+import copy
 import os
 
 import yaml
@@ -28,15 +29,35 @@ def load_object_profile(stem: str) -> dict:
         return yaml.safe_load(f) or {}
 
 
+def apply_object_profile(obj: dict, stem: str | None) -> dict:
+    """`obj` overlaid with the snapshot's `object` block (extension, profile, parts). A snapshot saved for
+    another object is skipped with a warning, so selecting one can never switch the object being processed."""
+    obj = copy.deepcopy(obj)
+    obj["object_profile"] = None
+    if not stem:
+        return obj
+    block = load_object_profile(stem).get("object") or {}
+    name = block.get("object_name", obj.get("object_name"))
+    if name != obj.get("object_name"):
+        print(f"[warn]: object profile '{stem}' belongs to '{name}', not '{obj.get('object_name')}'; skipped")
+        return obj
+    obj = _merge(obj, {k: v for k, v in block.items() if k != "object_name"})
+    obj["object_profile"] = stem
+    return obj
+
+
+def object_profile_params(stem: str) -> dict:
+    """The stage sections of a snapshot (its `object` block removed)."""
+    snapshot = load_object_profile(stem)
+    snapshot.pop("object", None)
+    return snapshot
+
+
 def load_object(object_profile: str | None = None) -> dict:
     """object_cfg.yml overlaid with the object profile's `object` block.
     `object_profile`: None = use object_cfg.yml's `object_profile`, "" = none."""
     obj = load_cfg("object_cfg")
-    stem = (obj.get("object_profile") if object_profile is None else object_profile) or None
-    if stem:
-        obj = _merge(obj, load_object_profile(stem).get("object") or {})
-    obj["object_profile"] = stem
-    return obj
+    return apply_object_profile(obj, obj.get("object_profile") if object_profile is None else object_profile)
 
 
 def load_params(profile: str | None = None, object_profile: str | None = None) -> dict:
@@ -48,9 +69,7 @@ def load_params(profile: str | None = None, object_profile: str | None = None) -
     if profile:
         params = _merge(params, load_cfg(f"profiles/{profile}_params_cfg"))
     if obj["object_profile"]:
-        snapshot = load_object_profile(obj["object_profile"])
-        snapshot.pop("object", None)
-        params = _merge(params, snapshot)
+        params = _merge(params, object_profile_params(obj["object_profile"]))
     return params
 
 

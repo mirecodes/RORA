@@ -2,7 +2,7 @@
 import copy
 
 import yaml
-from PySide6.QtCore import QPoint, QRegularExpression, Qt, Signal
+from PySide6.QtCore import QPoint, QRegularExpression, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QDoubleValidator, QPainter, QPen, QRegularExpressionValidator
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit,
                                QPushButton, QScrollArea, QSpinBox, QToolButton, QVBoxLayout, QWidget)
@@ -591,9 +591,13 @@ class ParamEditor(QWidget):
         node[path[-1]] = value
         self._mark()
         if root == "obj" and path[0] in RELOAD_KEYS:
-            self.object_changed.emit(copy.deepcopy(self.obj))
+            # Deferred: the reload rebuilds this form, which must not delete the widget still emitting.
+            QTimer.singleShot(0, self._emit_object_changed)
         else:
             self.changed.emit()
+
+    def _emit_object_changed(self) -> None:
+        self.object_changed.emit(copy.deepcopy(self.obj))
 
     def _mark(self) -> None:
         orig_obj, orig_params = self._orig

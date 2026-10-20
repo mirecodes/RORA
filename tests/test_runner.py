@@ -100,6 +100,8 @@ def test_first_blocked_names_missing_upstream():
     assert r.first_blocked(["align", "refine", "decompose"], {}) is None
     assert r.first_blocked(["decompose"], {"refine": {"dirs": {}}}) is None
     assert r.first_blocked(["align"], {}, restore_align=True) == ("align", ["transform"])
+    assert r.producer_labels(["refine", "decompose"]) == ["Refine", "Decompose"]
+    assert r.producer_labels(["transform"]) == ["Align"]
 
 
 def test_statuses_helpers():

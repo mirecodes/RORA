@@ -39,16 +39,31 @@ def test_no_object_profile_is_base_plus_shared_profile():
 
 def test_object_profile_overrides_params_and_object_block():
     with temp_cfgs() as d:
-        write(os.path.join(d, "profiles", "objects", "toy_20260101_000000.yml"),
-              "object:\n  object_name: toy\n  parts:\n    num: 7\n"
+        name = config.load_cfg("object_cfg")["object_name"]
+        write(os.path.join(d, "profiles", "objects", f"{name}_20260101_000000.yml"),
+              f"object:\n  object_name: {name}\n  parts:\n    num: 7\n"
               "decompose:\n  coacd:\n    threshold: 0.33\n")
-        obj = config.load_object("toy_20260101_000000")
-        assert obj["object_name"] == "toy" and obj["parts"]["num"] == 7
-        assert obj["object_profile"] == "toy_20260101_000000"
-        params = config.load_params(object_profile="toy_20260101_000000")
+        obj = config.load_object(f"{name}_20260101_000000")
+        assert obj["object_name"] == name and obj["parts"]["num"] == 7
+        assert obj["object_profile"] == f"{name}_20260101_000000"
+        params = config.load_params(object_profile=f"{name}_20260101_000000")
         assert params["decompose"]["coacd"]["threshold"] == 0.33
         assert "object" not in params
         assert "stages" in params["pipeline"]  # pipeline still comes from the base file
+
+
+def test_snapshot_of_another_object_never_switches_the_object():
+    with temp_cfgs() as d:
+        write(os.path.join(d, "profiles", "objects", "toy_20260101_000000.yml"),
+              "object:\n  object_name: toy\n  parts:\n    num: 7\n"
+              "decompose:\n  coacd:\n    threshold: 0.33\n")
+        name = config.load_cfg("object_cfg")["object_name"]
+        obj = config.load_object("toy_20260101_000000")
+        assert obj["object_name"] == name and obj["object_profile"] is None
+        assert config.load_params(object_profile="toy_20260101_000000") == config.load_params(object_profile="")
+        edited = config.apply_object_profile({"object_name": "toy", "parts": {"num": 3}}, "toy_20260101_000000")
+        assert edited["parts"]["num"] == 7 and edited["object_profile"] == "toy_20260101_000000"
+        assert config.object_profile_params("toy_20260101_000000") == {"decompose": {"coacd": {"threshold": 0.33}}}
 
 
 def test_default_reads_object_cfg_and_missing_file_only_warns():

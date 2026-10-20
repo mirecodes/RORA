@@ -39,11 +39,20 @@ def label_colors(vert_label, keep=None) -> np.ndarray:
     return rgb
 
 
+_vector_scale = None  # visualization.vector_scale of the running stage (set by run_stage)
+
+
+def set_vector_scale(vector_scale: dict | None) -> None:
+    """Use the running stage's params (GUI edits included); None falls back to the yml files."""
+    global _vector_scale
+    _vector_scale = vector_scale
+
+
 def arrow_params(verts: np.ndarray, scale: float = 1.0):
     """(arrow_len, shaft_rad, head_rad, head_len, sphere_rad) from the scene size,
-    scaled by visualization.vector_scale in cfgs/parameters_cfg.yml."""
+    scaled by visualization.vector_scale."""
     try:
-        vscale = load_params()["visualization"]["vector_scale"]
+        vscale = _vector_scale or load_params()["visualization"]["vector_scale"]
         lf, tf = float(vscale["length_factor"]), float(vscale["thickness_factor"])
     except Exception:
         lf, tf = 1.0, 1.0

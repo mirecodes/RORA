@@ -12,13 +12,13 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QFrame, QHBoxLayout, QLa
 from functions.gui import theme as th
 from functions.gui.bridge import UiBridge
 from functions.gui.panel import InteractionHost, LogView, ParamEditor, Timeline
-from functions.gui.params_io import list_object_profiles, load_comments, save_object_profile
+from functions.gui.params_io import list_object_profiles, load_comments, resolve_object_edit, save_object_profile
 from functions.gui.runner import (STAGE_LABELS, STAGE_ORDER, PipelineRunner, first_blocked, initial_statuses,
-                                  read_states, stale_after, stages_from)
+                                  producer_labels, read_states, stale_after, stages_from)
 from functions.gui.scenes import CheckpointScene
 from functions.gui.viewport import Viewport
 from functions.pipeline.interface import SystemConfigs, run_stage
-from functions.utils.config import load_object, load_params
+from functions.utils.config import _merge, load_object, load_params, object_profile_params
 
 PANEL_FRACTION, PANEL_MIN, PANEL_MAX = 0.22, 300, 380
 
@@ -162,12 +162,13 @@ class MainWindow(QMainWindow):
     def make_cfgs(self) -> SystemConfigs:
         return SystemConfigs(obj=copy.deepcopy(self._obj), params=copy.deepcopy(self._params))
 
-    def _reload_object(self, obj: dict) -> None:
+    def _reload_object(self, edited: dict) -> None:
+        obj = resolve_object_edit(self._obj, edited)
         stem = obj.get("object_profile") or ""
-        if stem:
-            obj = load_object(stem)  # a snapshot restores its own object block
         pipeline = copy.deepcopy(self._params["pipeline"])
-        params = load_params(profile=obj.get("profile"), object_profile=stem)
+        params = load_params(profile=obj.get("profile"), object_profile="")
+        if stem:
+            params = _merge(params, object_profile_params(stem))
         params["pipeline"] = pipeline  # run settings survive an object switch
         self._load(obj, params)
 
@@ -201,8 +202,8 @@ class MainWindow(QMainWindow):
         if blocked:
             stage, missing = blocked
             QMessageBox.warning(self, "Cannot run",
-                                f"{STAGE_LABELS[stage]} needs results that are not in states.json yet: "
-                                f"{', '.join(missing)}. Run the earlier stages first.")
+                                f"{STAGE_LABELS[stage]} needs results from {', '.join(producer_labels(missing))}, "
+                                f"which have not run for this object yet. Run them first.")
             return
         self.statuses = stale_after(self.statuses, stages[0])
         for stage, status in self.statuses.items():
@@ -292,10 +293,9 @@ class MainWindow(QMainWindow):
             self.interaction.set_widget(scene.widget())
         except Exception:
             # never leave the worker blocked: fail the stage with the GUI-side traceback
-            print(traceback.format_exc())
             self.scene = None
             self.viewport.unmount()
-            self.bridge.resolve(None)
+            self.bridge.fail(traceback.format_exc())
 
     def _finish_scene(self) -> None:
         if self.scene is None:

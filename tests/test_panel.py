@@ -97,6 +97,9 @@ def test_editor_kinds_and_object_reload_signal():
     editor.object_changed.connect(reloads.append)
     combo = editor.widgets[("obj", "object_profile")]
     combo.setCurrentIndex(combo.findText("toy_20261020_143012"))
+    # deferred: the reload rebuilds the form, so it must not run inside the combo's own signal
+    assert reloads == []
+    app.processEvents()
     assert reloads and reloads[-1]["object_profile"] == "toy_20261020_143012"
     assert ("obj", "parts", "num") in editor.widgets  # parts.num lives in the Segment section
     editor.set_stage_enabled("bind", False)

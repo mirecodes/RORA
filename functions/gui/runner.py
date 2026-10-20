@@ -44,6 +44,11 @@ def first_blocked(stages, states: dict, restore_align: bool = False):
     return None
 
 
+def producer_labels(sections) -> list[str]:
+    """Timeline names of the stages that write the given states.json sections."""
+    return [STAGE_LABELS[s] for section in sections for s, p in PRODUCES.items() if p == section]
+
+
 def initial_statuses(states: dict) -> dict:
     return {s: "cached" if PRODUCES[s] and states.get(PRODUCES[s]) else "pending" for s in STAGE_ORDER}
 

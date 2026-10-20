@@ -71,6 +71,16 @@ def test_snapshot_save_and_reload():
         assert config.load_object()["parts"]["num"] == 5
 
 
+def test_object_edit_resolution():
+    prev = {"object_name": "a", "profile": "real_object", "object_profile": "a_20261020_143012"}
+    # editing the object or the shared profile drops the snapshot, which belongs to the old combination
+    assert params_io.resolve_object_edit(prev, dict(prev, object_name="b"))["object_profile"] is None
+    assert params_io.resolve_object_edit(prev, dict(prev, profile="partnet_object"))["object_profile"] is None
+    # picking "(none)" keeps no snapshot; other edits keep the selected one
+    assert params_io.resolve_object_edit(prev, dict(prev, object_profile=""))["object_profile"] is None
+    assert params_io.resolve_object_edit(prev, dict(prev, extension="obj"))["object_profile"] == "a_20261020_143012"
+
+
 def test_same_second_saves_and_listing():
     with temp_cfgs() as d:
         obj = config.load_object("")
