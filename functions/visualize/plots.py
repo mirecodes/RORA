@@ -4,7 +4,7 @@ import pymeshlab
 import vedo
 
 from functions.math.geometry import normalize
-from functions.math.rlp import loop_normal, merge_lines, plane_intersections
+from functions.math.connection import merge_lines, plane_intersections, unicon_normal
 from functions.visualize.style import BG_RGB, PASTEL, arrow_params, label_colors, pastel, pastel_hex
 
 
@@ -47,33 +47,33 @@ def show_labels(verts, faces, vert_label, title: str = "Segmented Parts Preview"
     _show([mesh.alpha(0.4)], title, viewup="z")
 
 
-def show_loops(verts, faces, loops, loop_neighbors, parent_part: int, vert_label=None,
-               title: str = "All Boundary Loops", show_none_loops: bool = False):
-    """Boundary loops of a part, each colored by the neighbor part it touches."""
-    parent_color = pastel_hex(parent_part)
+def show_cycles(verts, faces, cycles, cycle_neighbors, idx_part: int, vert_label=None,
+                title: str = "All Boundary Cycles", show_none_cycles: bool = False):
+    """Boundary cycles of a part, each colored by the neighbor part it touches."""
+    part_color = pastel_hex(idx_part)
     if vert_label is None:
-        actors = [vedo.Mesh([verts, faces]).c(parent_color).alpha(0.35)]
+        actors = [vedo.Mesh([verts, faces]).c(part_color).alpha(0.35)]
     else:
-        is_parent = vert_label[faces[:, 0]] == parent_part
+        is_part = vert_label[faces[:, 0]] == idx_part
         actors = [vedo.Mesh([verts, f]).c(c).alpha(a) for f, c, a in
-                  ((faces[~is_parent], "lightgray", 0.15), (faces[is_parent], parent_color, 0.35)) if len(f)]
+                  ((faces[~is_part], "lightgray", 0.15), (faces[is_part], part_color, 0.35)) if len(f)]
 
     diag = float(np.linalg.norm(verts.max(axis=0) - verts.min(axis=0)))
     sphere_r = (diag * 0.005 if np.isfinite(diag) and diag > 0 else 0.005) * 1.2
-    for i, (loop, nbrs) in enumerate(zip(loops, loop_neighbors)):
-        if not nbrs and not show_none_loops:
+    for i, (cycle, nbrs) in enumerate(zip(cycles, cycle_neighbors)):
+        if not nbrs and not show_none_cycles:
             continue
-        target = nbrs[0] if nbrs and isinstance(nbrs[0], int) else parent_part
-        actors.append(vedo.Spheres(verts[np.asarray(loop, dtype=int)], r=sphere_r, c=pastel_hex(target), res=8))
+        target = nbrs[0] if nbrs and isinstance(nbrs[0], int) else idx_part
+        actors.append(vedo.Spheres(verts[np.asarray(cycle, dtype=int)], r=sphere_r, c=pastel_hex(target), res=8))
         r, g, b = pastel(target)
         print(f"[info] Cycle {i + 1} (\033[38;2;{r};{g};{b}m■\033[0m): "
-              f"Part {parent_part} -> {','.join(map(str, nbrs)) if nbrs else 'N'}")
+              f"Part {idx_part} -> {','.join(map(str, nbrs)) if nbrs else 'N'}")
     _show(actors, title, viewup="z")
 
 
-def show_separator(verts, faces, idx_pos, idx_neg, planes, center, title: str = "k-hop neighbors and plane",
-                   loop_indices=None, parent_part: int = 1, loop_color: str | None = None):
-    """k-hop samples (positives in part color), the loop, the fitted plane(s) and their normal/intersection."""
+def show_axis_estimation(verts, faces, idx_pos, idx_neg, planes, center, title: str = "k-hop neighbors and plane",
+                         cycle_indices=None, idx_part: int = 1, cycle_color: str | None = None):
+    """k-hop samples (positives in part color), the cycle, the fitted plane(s) and their normal/intersection."""
     actors = [vedo.Mesh([verts, faces]).c("lightgray").alpha(0.18)]
 
     khop = np.union1d(idx_pos, idx_neg).astype(int)
@@ -81,13 +81,13 @@ def show_separator(verts, faces, idx_pos, idx_neg, planes, center, title: str = 
     if len(khop_faces):
         rgb = np.tile(np.array([230, 230, 230], dtype=np.uint8), (len(verts), 1))
         rgb[idx_neg] = PASTEL[-1]
-        rgb[idx_pos] = pastel(parent_part)
+        rgb[idx_pos] = pastel(idx_part)
         khop_mesh = vedo.Mesh([verts, khop_faces])
         khop_mesh.pointcolors = rgb
         actors.append(khop_mesh.alpha(0.7).lw(0.8).lc("black"))
 
-    if loop_indices is not None and len(loop_indices):
-        actors.append(vedo.Spheres(verts[loop_indices], r=0.006, c=loop_color or pastel_hex(parent_part), res=8))
+    if cycle_indices is not None and len(cycle_indices):
+        actors.append(vedo.Spheres(verts[cycle_indices], r=0.006, c=cycle_color or pastel_hex(idx_part), res=8))
 
     plane_colors = ["#9EAEC4", "#C4AE9E", "#9EC4AF", "#C49EC1"]
     for i, (n, d) in enumerate(planes):
@@ -104,19 +104,19 @@ def show_separator(verts, faces, idx_pos, idx_neg, planes, center, title: str = 
         n_inter = np.cross(normalize(planes[0][0]), normalize(planes[1][0]))
         if np.linalg.norm(n_inter) > 1e-6:
             actors.append(_arrow(center, normalize(n_inter), "dodgerblue", size))
-            print("  \033[38;2;30;144;255m[Intersection Vector - Blue]\033[0m Polyhedral Planes Intersection Vector")
+            print("  \033[38;2;30;144;255m[Intersection Vector - Blue]\033[0m Multi-plane Intersection Vector")
     _show(actors, title, viewup="z")
 
 
-def show_rlps(verts, faces, rlps):
-    """Per RLP: (1) linear normals, (2) polyhedral intersection lines, (3) the resulting 3-axis frame."""
+def show_bicons(verts, faces, bicons):
+    """Per bicon: (1) single-plane normals, (2) multi-plane intersection lines, (3) the resulting 3-axis frame."""
     size = arrow_params(verts)
-    for idx_r, rlp in enumerate(rlps):
-        a, b = rlp.get("a"), rlp.get("b")
-        if not rlp.get("parts") or not a or not b:
+    for idx_b, bicon in enumerate(bicons):
+        a, b = bicon.get("a"), bicon.get("b")
+        if not bicon.get("parts") or not a or not b:
             continue
-        i, j = rlp["parts"]
-        tag = f"RLP #{idx_r} (parts {i} ↔ {j})"
+        i, j = bicon["parts"]
+        tag = f"Bicon #{idx_b} (parts {i} ↔ {j})"
         print(f"[info] Visualizing {tag}. Close window to proceed.")
 
         rgb = np.tile(BG_RGB, (len(verts), 1))
@@ -128,29 +128,29 @@ def show_rlps(verts, faces, rlps):
         mesh.pointcolors = rgb
         mesh.alpha(0.4).pickable(False)
 
-        ca, cb, c = (np.asarray(x, dtype=float) for x in (a["center"], b["center"], rlp["center"]))
+        ca, cb, c = (np.asarray(x, dtype=float) for x in (a["center"], b["center"], bicon["center"]))
         conn = vedo.Line(ca, cb).c("orange").lw(3)
-        n_pair = normalize(rlp["normal"])
+        n_pair = normalize(bicon["normal"])
 
-        # 1) Linear normals
-        nA, nB = loop_normal(a), loop_normal(b)
+        # 1) Single-plane normals
+        nA, nB = unicon_normal(a), unicon_normal(b)
         nB = -nB if np.dot(nA, nB) < 0.0 else nB
-        print(f"[info] {tag} - Window 1: Linear Normal Match")
-        print(f"  \033[38;2;255;127;14m[Normal Vector - Orange]\033[0m Linear Normal vectors for Part {i}, Part {j}, and Merged RLP Normal")
-        vedo.Plotter(title=f"RLP #{idx_r} (Linear Normal Match): parts {i} ↔ {j}", axes=0, size=(1800, 1800)).show(
+        print(f"[info] {tag} - Window 1: Single-plane Normal Match")
+        print(f"  \033[38;2;255;127;14m[Normal Vector - Orange]\033[0m Single-plane Normal vectors for Part {i}, Part {j}, and Merged Bicon Normal")
+        vedo.Plotter(title=f"Bicon #{idx_b} (Single-plane Normal Match): parts {i} ↔ {j}", axes=0, size=(1800, 1800)).show(
             [mesh, conn, _arrow(ca, nA, "orange", size), _arrow(cb, nB, "orange", size),
              _arrow(c, n_pair, "orange", size, big=True), vedo.Sphere(pos=c, r=size[4] * 1.2).c("orange")],
             interactive=True).close()
 
-        # 2) Polyhedral intersection lines
-        lines_a = plane_intersections((a.get("polyhedral") or {}).get("plane") or [])
-        lines_b = plane_intersections((b.get("polyhedral") or {}).get("plane") or [])
+        # 2) Multi-plane intersection lines
+        lines_a = plane_intersections((a.get("multi_plane") or {}).get("plane") or [])
+        lines_b = plane_intersections((b.get("multi_plane") or {}).get("plane") or [])
         if not lines_a and not lines_b:
             continue
         merged = merge_lines(lines_a, lines_b)
-        print(f"[info] {tag} - Window 2: Polyhedral Intersection Match")
-        print("  \033[38;2;30;144;255m[Intersection Vector - Blue]\033[0m Polyhedral Intersection Lines A, B & Merged Lines")
-        vedo.Plotter(title=f"RLP #{idx_r} (Polyhedral Intersection Match): parts {i} ↔ {j}", axes=0, size=(1800, 1800)).show(
+        print(f"[info] {tag} - Window 2: Multi-plane Intersection Match")
+        print("  \033[38;2;30;144;255m[Intersection Vector - Blue]\033[0m Multi-plane Intersection Lines A, B & Merged Lines")
+        vedo.Plotter(title=f"Bicon #{idx_b} (Multi-plane Intersection Match): parts {i} ↔ {j}", axes=0, size=(1800, 1800)).show(
             [mesh, conn] + [_arrow(ca, l, "dodgerblue", size) for l in lines_a]
             + [_arrow(cb, l, "dodgerblue", size) for l in lines_b]
             + [_arrow(c, l, "dodgerblue", size, big=True) for l in merged],
@@ -164,7 +164,7 @@ def show_rlps(verts, faces, rlps):
         print("  1. \033[38;2;255;127;14m[Normal Vector - Orange]\033[0m Main Plane Normal")
         print("  2. \033[38;2;30;144;255m[Intersection Vector - Blue]\033[0m Intersection Line")
         print("  3. \033[38;2;46;139;87m[Cross Product Vector - Green]\033[0m Perpendicular Axis (Cross Product)")
-        vedo.Plotter(title=f"RLP #{idx_r} (3rd Perpendicular Coordinate Frame): parts {i} ↔ {j}", axes=0, size=(1800, 1800)).show(
+        vedo.Plotter(title=f"Bicon #{idx_b} (3rd Perpendicular Coordinate Frame): parts {i} ↔ {j}", axes=0, size=(1800, 1800)).show(
             [mesh, _arrow(c, n_pair, "orange", size, big=True), _arrow(c, merged[0], "dodgerblue", size, big=True),
              _arrow(c, normalize(n_third), "mediumseagreen", size, big=True)],
             interactive=True).close()

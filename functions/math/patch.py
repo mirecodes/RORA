@@ -1,4 +1,4 @@
-"""Fill a boundary loop with a smooth triangulated patch (loop projected to its PCA plane)."""
+"""Fill a boundary cycle with a smooth triangulated patch (cycle projected to its PCA plane)."""
 import matplotlib.tri as mtri
 import numpy as np
 
@@ -6,7 +6,7 @@ from functions.math.geometry import basis_from_normal, pca_plane
 
 
 # ---------------------------------------------------------------------
-# 2D helpers (uv = loop plane coordinates)
+# 2D helpers (uv = cycle plane coordinates)
 # ---------------------------------------------------------------------
 def in_polygon(poly_uv: np.ndarray, pts_uv: np.ndarray) -> np.ndarray:
     """Ray-casting point-in-polygon test."""
@@ -32,22 +32,22 @@ def _closed(poly_uv: np.ndarray) -> bool:
     return poly_uv.shape[0] >= 2 and np.allclose(poly_uv[0], poly_uv[-1])
 
 
-def boundary_height(pts_uv: np.ndarray, poly_uv: np.ndarray, h_loop: np.ndarray):
-    """Distance to the loop polyline and the loop height interpolated at the closest point."""
+def boundary_height(pts_uv: np.ndarray, poly_uv: np.ndarray, h_cycle: np.ndarray):
+    """Distance to the cycle polyline and the cycle height interpolated at the closest point."""
     if poly_uv.shape[0] >= 2 and not _closed(poly_uv):
         poly_uv = np.vstack([poly_uv, poly_uv[0]])
-        h_loop = np.concatenate([h_loop, h_loop[:1]])
+        h_cycle = np.concatenate([h_cycle, h_cycle[:1]])
     dist2 = np.full(len(pts_uv), np.inf)
     hb = np.zeros(len(pts_uv))
     for i in range(len(poly_uv) - 1):
         _, t, d2 = project_to_segment(pts_uv, poly_uv[i], poly_uv[i + 1])
         upd = d2 < dist2
         dist2[upd] = d2[upd]
-        hb[upd] = (1.0 - t[upd]) * h_loop[i] + t[upd] * h_loop[i + 1]
+        hb[upd] = (1.0 - t[upd]) * h_cycle[i] + t[upd] * h_cycle[i + 1]
     return np.sqrt(dist2), hb
 
 
-def densify_loop(poly_uv: np.ndarray, step: float) -> np.ndarray:
+def densify_cycle(poly_uv: np.ndarray, step: float) -> np.ndarray:
     """Closed polyline with extra samples every ~step along each edge."""
     poly_uv = np.asarray(poly_uv, dtype=float)
     if poly_uv.shape[0] >= 2 and not _closed(poly_uv):
@@ -123,16 +123,16 @@ def radius_update(idx, pts_uv, H, known, sigma, k_min, radius) -> bool:
 # ---------------------------------------------------------------------
 # Patch
 # ---------------------------------------------------------------------
-def loop_patch(loop_xyz, *, step_rel: float = 0.01, sigma_scale: float = 2.0, k_min: int = 6):
-    """Triangulated patch filling a 3D loop. Returns (vertices (N,3), faces (M,3))."""
+def cycle_patch(cycle_xyz, *, step_rel: float = 0.01, sigma_scale: float = 2.0, k_min: int = 6):
+    """Triangulated patch filling a 3D cycle. Returns (vertices (N,3), faces (M,3))."""
     empty = np.zeros((0, 3), dtype=float), np.zeros((0, 3), dtype=int)
-    loop_xyz = np.asarray(loop_xyz, dtype=float)
-    if loop_xyz.shape[0] < 3:
+    cycle_xyz = np.asarray(cycle_xyz, dtype=float)
+    if cycle_xyz.shape[0] < 3:
         return empty
 
-    c, n = pca_plane(loop_xyz)
+    c, n = pca_plane(cycle_xyz)
     u, v, n = basis_from_normal(n)
-    rel = loop_xyz - c
+    rel = cycle_xyz - c
     poly_uv = np.column_stack([rel @ u, rel @ v])
     poly_open = poly_uv[:-1] if _closed(poly_uv) else poly_uv
 
@@ -142,7 +142,7 @@ def loop_patch(loop_xyz, *, step_rel: float = 0.01, sigma_scale: float = 2.0, k_
         return empty
     step = max(diag * step_rel, 1e-6)
 
-    # Grid points inside the loop + densified loop as boundary
+    # Grid points inside the cycle + densified cycle as boundary
     nx = max(1, int(np.ceil((bb_max[0] - bb_min[0]) / step))) + 1
     ny = max(1, int(np.ceil((bb_max[1] - bb_min[1]) / step))) + 1
     GX, GY = np.meshgrid(np.linspace(bb_min[0], bb_max[0], nx), np.linspace(bb_min[1], bb_max[1], ny))
@@ -151,9 +151,9 @@ def loop_patch(loop_xyz, *, step_rel: float = 0.01, sigma_scale: float = 2.0, k_
     if pts_inside.size == 0:
         return empty
 
-    dense_boundary = densify_loop(poly_uv, step)
-    h_loop = rel @ n
-    _, hb_dense = boundary_height(dense_boundary, poly_uv, h_loop)
+    dense_boundary = densify_cycle(poly_uv, step)
+    h_cycle = rel @ n
+    _, hb_dense = boundary_height(dense_boundary, poly_uv, h_cycle)
 
     pts_uv = np.vstack([pts_inside, dense_boundary])
     M_in, M_bd = pts_inside.shape[0], dense_boundary.shape[0]
@@ -162,7 +162,7 @@ def loop_patch(loop_xyz, *, step_rel: float = 0.01, sigma_scale: float = 2.0, k_
     tri = delaunay_2d(pts_uv)
     if tri is None:
         # No triangulation: propagate heights inward from the boundary (points only)
-        dist_in, hb_in = boundary_height(pts_inside, poly_uv, h_loop)
+        dist_in, hb_in = boundary_height(pts_inside, poly_uv, h_cycle)
         dist = np.concatenate([dist_in, np.zeros(M_bd)])
         hb = np.concatenate([hb_in, hb_dense])
         H = np.full(pts_uv.shape[0], np.nan)
@@ -183,7 +183,7 @@ def loop_patch(loop_xyz, *, step_rel: float = 0.01, sigma_scale: float = 2.0, k_
     hB[M_in:] = hb_dense
     H = harmonic_heights(pts_uv, tri.triangles, boundary_mask, hB)
 
-    # Keep triangles whose centroid is inside the loop
+    # Keep triangles whose centroid is inside the cycle
     tris = np.asarray(tri.triangles, dtype=int)
     inside = in_polygon(poly_open, pts_uv[tris].mean(axis=1))
     return to_xyz(H), tris[inside]

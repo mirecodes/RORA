@@ -112,7 +112,7 @@ def _slice_vertex_in_ply(ply: PlyData, idxs, transform_matrix=None):
 
 # ------------------------------ core mapping ----------------------------------
 
-def _assign_categories_knn3(mesh, vert_labels, gauss_xyz, k=3, max_dist_rel=0.02):
+def _assign_parts_knn3(mesh, vert_labels, gauss_xyz, k=3, max_dist_rel=0.02):
     """
     k=3 K-NN majority vote on vertex labels.
     - If nearest distance > max_dist_rel * diag: assign -1 (exclude).
@@ -191,7 +191,7 @@ def stage_bind(cfgs):
     # This causes mismatch with vert_labels which are based on the original file indices.
     mesh = trimesh.load(mesh_path, process=False)
     
-    vert_labels = states.segment.vert_label
+    vert_labels = np.load(states.segment.dirs.vert_label)
     print(f"[Info] Loaded vertex labels: {len(vert_labels)} labels")
 
     # [Check] Validate counts
@@ -229,7 +229,7 @@ def stage_bind(cfgs):
 
     # --- KNN assignment on z-kept points ---
     print(f"[Info] Running KNN assignment for {len(xyz_kept)} points...")
-    assigned_kept = _assign_categories_knn3(
+    assigned_kept = _assign_parts_knn3(
         mesh, vert_labels, xyz_kept,
         k=bind_cfgs["k_neighbors"],
         max_dist_rel=bind_cfgs["max_dist_rel"]
@@ -243,14 +243,14 @@ def stage_bind(cfgs):
         uniq, cnts = np.unique(assigned, return_counts=True)
         print("[assign-knn3] label counts (including -1 excluded):", dict(zip(uniq.tolist(), cnts.tolist())))
 
-    # Save per-category except -1
+    # Save per-part except -1
     keep = (assigned != -1)
-    cats = np.unique(assigned[keep])
-    
-    print(f"[Info] Found {len(cats)} categories to save: {cats}")
+    part_ids = np.unique(assigned[keep])
 
-    if len(cats) == 0:
-        print("[Warning] No valid categories found to save (all points excluded or no labels assigned).")
+    print(f"[Info] Found {len(part_ids)} parts to save: {part_ids}")
+
+    if len(part_ids) == 0:
+        print("[Warning] No valid parts found to save (all points excluded or no labels assigned).")
         
     # [New] Prepare Transform Matrix if needed
     transform_matrix = None
@@ -265,12 +265,12 @@ def stage_bind(cfgs):
         except Exception as e:
             print(f"[Error] Failed to prepare transform matrix: {e}")
 
-    for c in cats:
+    for c in part_ids:
         idxs = np.nonzero(keep & (assigned == c))[0]
         if idxs.size == 0:
             continue
         out_path = os.path.join(cfgs.gaussian_out_dir, f"gaussian_{int(c)}.ply")
-        print(f"[Info] Saving category {c} to {out_path} with {idxs.size} points")
+        print(f"[Info] Saving part {c} to {out_path} with {idxs.size} points")
         try:
             # Pass transform_matrix to slice function
             _slice_vertex_in_ply(g_ply, idxs, transform_matrix=transform_matrix).write(out_path)

@@ -5,7 +5,7 @@ import numpy as np
 from plyfile import PlyData
 
 from functions.render.urdf_parser import URDFParser  # ← separate file
-from functions.stages.transform import _closest_rotation, save_gaussian_with_transform
+from functions.pipeline.transform import _closest_rotation, save_gaussian_with_transform
 
 
 

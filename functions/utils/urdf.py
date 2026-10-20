@@ -28,20 +28,20 @@ def _apply(T, p) -> np.ndarray:
 # =============================================================================
 # Joints
 # =============================================================================
-def joints_from_rlps(rlps: list[dict]) -> list[dict]:
-    """Joint candidates from the vectors selected on RLPs (state Revolute/Prismatic).
+def joints_from_bicons(bicons: list[dict]) -> list[dict]:
+    """Joint candidates from the vectors selected on bicons (state Revolute/Prismatic).
     Vectors of one part pair sharing an origin merge: 2+ revolute -> Spherical, 2+ prismatic -> Planar.
     parent/child are (min, max) here; spanning_tree() decides the direction."""
     picked = []
-    for rlp in rlps:
-        p = int(rlp.get("a", {}).get("parent", rlp.get("parent", -1)))
-        c = int(rlp.get("a", {}).get("child", rlp.get("child", -1)))
+    for bicon in bicons:
+        p = int(bicon.get("a", {}).get("src", bicon.get("src", -1)))
+        c = int(bicon.get("a", {}).get("dst", bicon.get("dst", -1)))
         if p < 0 or c < 0 or p == c:
             continue
-        for v in rlp.get("vectors") or []:
+        for v in bicon.get("vectors") or []:
             if v.get("state") not in ("Revolute", "Prismatic"):
                 continue
-            o = np.asarray(v.get("center", rlp.get("center", [0, 0, 0])), dtype=float).ravel()
+            o = np.asarray(v.get("center", bicon.get("center", [0, 0, 0])), dtype=float).ravel()
             n = np.asarray(v.get("n") if v.get("n") is not None else v.get("n_poly"), dtype=float).ravel()
             if o.size != 3 or n.size != 3:
                 continue

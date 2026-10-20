@@ -35,7 +35,7 @@ class SystemConfigs():
         # Object
         self.object_name = self.obj["object_name"]
         self.extension = self.obj["extension"]
-        self.categories_num = self.obj["parts"]["num"]
+        self.parts_num = self.obj["parts"]["num"]
 
         # Fundamental directories
         self.in_dir = os.path.join(self.root_dir, "data", "objects", self.object_name)

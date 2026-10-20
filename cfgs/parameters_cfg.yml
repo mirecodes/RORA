@@ -78,29 +78,30 @@ decompose:
     seed: 0
 
 segment:
-  allow_single_loop_rlp: true
   labeling:                   # passed to math.graph.label_vertices
     use_signed_dist: true
     sdf_thresh: 0.0
-  separator:                  # passed to math.separator.learn_separators
+
+articulate:
+  allow_unpaired_unicon: true # promote a unicon with no reverse match to a bicon
+  axis_estimation:            # passed to math.axis_estimation.estimate_unicons
     max_hops: 10
-    method: all               # linear | rbf | polyhedral | all
+    method: all               # single_plane | rbf | multi_plane | all
     C: 1.0
     gamma: scale
     balance: None
     neighbor_threshold: 0.25
     min_size_to_keep: 0
-    show_none_loops: false
-  rlp_clustering:             # passed to math.rlp.cluster_rlps
+    show_none_cycles: false
+  fusion:                     # passed to math.connection.fuse_connections
     w_pos: 1.0
     w_ang: 0.5
     cost_max: null
   vector_augment_min_count: 2
-
-articulate:
-  urdf_name: object
-  density: 1000.0
-  mesh_fmt: stl
+  urdf:                       # passed to utils.urdf.generate_urdf
+    urdf_name: object
+    density: 1000.0
+    mesh_fmt: stl
 
 bind:
   k_neighbors: 3

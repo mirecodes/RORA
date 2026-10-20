@@ -4,8 +4,10 @@ Builds an articulated **URDF** and **per-part Gaussians** from a mesh (`mesh.ply
 
 ```
 align → refine → decompose → segment → articulate → bind
-align    clean     convex      part        URDF        Gaussian
-         mesh      decomp.     split       export      binding
+align    clean     convex      part        joint       Gaussian
+         mesh      decomp.     grouping +  suggestion  binding
+                               vertex      + selection
+                               labels      + URDF
 ```
 
 ## 1. Install
@@ -54,7 +56,7 @@ e.g. `data/objects/apr_diffuser/mesh.ply`, `data/objects/apr_diffuser/gaussian.p
 object_name: apr_diffuser   # folder under data/objects/
 extension: ply
 parts:
-  num: 3                    # number of movable part categories
+  num: 3                    # number of parts the convex fragments are grouped into
 profile: real_object        # real_object (real scan) | partnet_object (PartNet synthetic)
 ```
 
@@ -82,9 +84,9 @@ Some stages open interactive GUI windows. Controls are also printed in the termi
 
 - **align**: orient the object Z-up.
   Rotate Z/Y/X: `U/I`, `H/J`, `B/N`. Move X/Y/Z: `W/S`, `D/A`, `Space/Z`. Save: `Q` or `Esc`.
-- **segment (parts)**: assign pieces to categories.
-  `Tab` switches category, left click assigns, right click unassigns. Next: `Q` or `Esc`.
-- **segment (joint axis)**: click an arrow to pick the joint type. Once = yellow (revolute), twice = blue (prismatic).
+- **segment (parts)**: group convex fragments into parts.
+  `Tab` switches part, left click assigns, right click unassigns. Next: `Q` or `Esc`.
+- **articulate (joint axis)**: click an arrow to pick the joint type. Once = yellow (revolute), twice = blue (prismatic).
 
 ### Output
 
@@ -94,7 +96,11 @@ export/<object_name>/
 │   ├── object.urdf
 │   └── meshes/link_*.stl
 └── gaussian/gaussian_*.ply    # per-part Gaussians
-working/<object_name>/         # intermediates (meshes/, attributes/states.json)
+working/<object_name>/
+├── meshes/                    # refined mesh, fragment_*.ply (decompose), links/link_*.ply (articulate)
+└── attributes/
+    ├── states.json            # paths and per-stage results
+    └── vert_label.npy         # per-vertex part labels of the refined mesh (segment → articulate, bind)
 ```
 
 Per-stage timings are printed at the end.
@@ -115,6 +121,8 @@ pipeline:
 ```
 
 align, refine, and decompose must have run once so their results exist in `working/<object_name>/`.
+
+To redo only joint selection with the same part grouping, also set `segment: false`; articulate reloads `attributes/vert_label.npy`.
 
 ## 5. (Optional) PartNet-Mobility preprocessing
 

@@ -6,7 +6,7 @@ import trimesh
 from shapely.geometry import Polygon
 
 from functions.math.geometry import pca_plane, ransac_plane, rotmat
-from functions.math.graph import mesh_boundary_loops
+from functions.math.graph import mesh_boundary_cycles
 
 
 # =============================================================================
@@ -36,19 +36,19 @@ def replace_first_mesh(ms: pymeshlab.MeshSet, verts, faces) -> pymeshlab.MeshSet
     return out
 
 
-def _largest_loop(t_mesh: trimesh.Trimesh):
-    loops = mesh_boundary_loops(t_mesh)
-    return max(loops, key=len) if loops else None
+def _largest_cycle(t_mesh: trimesh.Trimesh):
+    cycles = mesh_boundary_cycles(t_mesh)
+    return max(cycles, key=len) if cycles else None
 
 
 def align_transform(ms: pymeshlab.MeshSet):
-    """4x4 transform putting the mesh bottom (largest boundary loop, else RANSAC plane) on z=0, z-up."""
+    """4x4 transform putting the mesh bottom (largest boundary cycle, else RANSAC plane) on z=0, z-up."""
     t_mesh = to_trimesh(ms)
-    loop = _largest_loop(t_mesh)
-    if loop is not None:
-        bottom = t_mesh.vertices[loop]
+    cycle = _largest_cycle(t_mesh)
+    if cycle is not None:
+        bottom = t_mesh.vertices[cycle]
     else:
-        print("[warning] Boundary loop does not exist. Trying to find the largest plane using RANSAC...")
+        print("[warning] Boundary cycle does not exist. Trying to find the largest plane using RANSAC...")
         threshold = 0.005 * np.linalg.norm(t_mesh.bounds[1] - t_mesh.bounds[0])  # 0.5% of the diagonal
         inliers = ransac_plane(t_mesh.vertices, threshold=threshold)
         if inliers.sum() < 3:
@@ -73,24 +73,24 @@ def align_transform(ms: pymeshlab.MeshSet):
 
 
 def flatten_bottom_hole(ms: pymeshlab.MeshSet, target_z: float = 0.0) -> pymeshlab.MeshSet:
-    """Move the largest boundary loop onto z = target_z."""
+    """Move the largest boundary cycle onto z = target_z."""
     t_mesh = to_trimesh(ms)
-    loop = _largest_loop(t_mesh)
-    if loop is None:
-        print("[warning] Boundary loop does not exist. Nothing to flatten.")
+    cycle = _largest_cycle(t_mesh)
+    if cycle is None:
+        print("[warning] Boundary cycle does not exist. Nothing to flatten.")
         return ms
-    t_mesh.vertices[loop, 2] = target_z
+    t_mesh.vertices[cycle, 2] = target_z
     return replace_first_mesh(ms, t_mesh.vertices, t_mesh.faces)
 
 
 def fill_bottom_hole(ms: pymeshlab.MeshSet) -> pymeshlab.MeshSet:
-    """Cap the largest boundary loop (assumed flat on z=0) with a constrained Delaunay patch."""
+    """Cap the largest boundary cycle (assumed flat on z=0) with a constrained Delaunay patch."""
     t_mesh = to_trimesh(ms)
-    loop = _largest_loop(t_mesh)
-    if loop is None:
-        print("[warning] Boundary loop does not exist. Nothing to fill.")
+    cycle = _largest_cycle(t_mesh)
+    if cycle is None:
+        print("[warning] Boundary cycle does not exist. Nothing to fill.")
         return ms
-    cap_xy, cap_faces = trimesh.creation.triangulate_polygon(Polygon(t_mesh.vertices[loop][:, :2]))
+    cap_xy, cap_faces = trimesh.creation.triangulate_polygon(Polygon(t_mesh.vertices[cycle][:, :2]))
     cap = np.column_stack([cap_xy, np.zeros(len(cap_xy))])
     offset = len(t_mesh.vertices)
     t_mesh.vertices = np.vstack([t_mesh.vertices, cap])
@@ -113,11 +113,11 @@ def submesh(verts: np.ndarray, faces: np.ndarray, labels: np.ndarray, k: int):
     return verts[vidx], vmap[faces_k]
 
 
-def save_link_meshes(verts, faces, labels, categories_num: int, out_dir: str) -> dict[str, str]:
+def save_link_meshes(verts, faces, labels, parts_num: int, out_dir: str) -> dict[str, str]:
     """Save out_dir/link_<k>.ply per label k. Returns {str(k): path}."""
     os.makedirs(out_dir, exist_ok=True)
     paths = {}
-    for k in range(1, categories_num + 1):
+    for k in range(1, parts_num + 1):
         sv, sf = submesh(verts, faces, labels, k)
         if sv is not None:
             paths[str(k)] = os.path.join(out_dir, f"link_{k}.ply")

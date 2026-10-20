@@ -26,21 +26,21 @@ def stage_decompose(cfgs):
     print(f"[info] Running CoACD with parameters: {params}")
 
     # Run convex decomposition
-    parts = coacd.run_coacd(mesh, **params)
+    fragments = coacd.run_coacd(mesh, **params)
 
     # Save intermediate state into the json file
     states.decompose = {}
-    states.decompose.length = len(parts)
+    states.decompose.length = len(fragments)
     states.decompose.dirs = {
         "mesh": list()
     }
 
-    # Save each part with index suffix
+    # Save each convex fragment with index suffix
     os.makedirs(os.path.dirname(cfgs.mesh_working_dir), exist_ok=True)
 
-    for i, part in enumerate(parts, start=1):
-        tri = trimesh.Trimesh(vertices=part[0], faces=part[1], process=False)
-        fname = f"decomposed_{i}.{cfgs.extension}"
+    for i, fragment in enumerate(fragments, start=1):
+        tri = trimesh.Trimesh(vertices=fragment[0], faces=fragment[1], process=False)
+        fname = f"fragment_{i}.{cfgs.extension}"
         decompose_dir = os.path.join(cfgs.mesh_working_dir, fname)
         tri.export(decompose_dir)
         states.decompose.dirs.mesh.append(decompose_dir)
