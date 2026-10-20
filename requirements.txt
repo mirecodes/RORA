@@ -33,11 +33,13 @@ plyfile==1.1.2
 Pygments==2.19.2
 pymeshlab==2025.7
 pyparsing==3.2.3
+PySide6==6.12.0
 python-dateutil==2.9.0.post0
 PyYAML==6.0.2
 referencing==0.36.2
 rich==14.1.0
 rpds-py==0.27.0
+ruamel.yaml==0.18.17
 rtree==1.4.1
 scikit-image==0.25.2
 scikit-learn==1.7.1

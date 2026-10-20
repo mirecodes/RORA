@@ -18,13 +18,39 @@ def _merge(base: dict, override: dict) -> dict:
     return base
 
 
-def load_params(profile: str | None = None) -> dict:
-    """parameters_cfg.yml overlaid with cfgs/profiles/<profile>_params_cfg.yml.
-    `profile` defaults to object_cfg.yml's `profile` (null/missing = no overlay)."""
+def load_object_profile(stem: str) -> dict:
+    """cfgs/profiles/objects/<stem>.yml (a GUI-saved object snapshot); {} with a warning if missing."""
+    path = os.path.join(CFG_DIR, "profiles", "objects", f"{stem}.yml")
+    if not os.path.isfile(path):
+        print(f"[warn]: object profile not found, skipped: {path}")
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+
+def load_object(object_profile: str | None = None) -> dict:
+    """object_cfg.yml overlaid with the object profile's `object` block.
+    `object_profile`: None = use object_cfg.yml's `object_profile`, "" = none."""
+    obj = load_cfg("object_cfg")
+    stem = (obj.get("object_profile") if object_profile is None else object_profile) or None
+    if stem:
+        obj = _merge(obj, load_object_profile(stem).get("object") or {})
+    obj["object_profile"] = stem
+    return obj
+
+
+def load_params(profile: str | None = None, object_profile: str | None = None) -> dict:
+    """parameters_cfg.yml, then cfgs/profiles/<profile>_params_cfg.yml, then the object profile without
+    its `object` block. `profile` defaults to the object's `profile`; `object_profile` as in load_object."""
+    obj = load_object(object_profile)
+    profile = profile or obj.get("profile")
     params = load_cfg("parameters_cfg")
-    profile = profile or load_cfg("object_cfg").get("profile")
     if profile:
         params = _merge(params, load_cfg(f"profiles/{profile}_params_cfg"))
+    if obj["object_profile"]:
+        snapshot = load_object_profile(obj["object_profile"])
+        snapshot.pop("object", None)
+        params = _merge(params, snapshot)
     return params
 
 

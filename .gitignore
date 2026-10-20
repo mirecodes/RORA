@@ -1,6 +1,9 @@
 # OS
 .DS_Store
 
+# Claude
+.superpowers
+
 # IDE
 .idea/
 
