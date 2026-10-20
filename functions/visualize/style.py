@@ -3,6 +3,7 @@ import time
 import numpy as np
 import vedo
 
+from functions.gui import theme
 from functions.utils.config import load_params
 
 # Part colors: label k -> PASTEL[(k - 1) % len]
@@ -11,12 +12,17 @@ PASTEL_HEX = ["#66C5CC", "#F6CF71", "#F89C74", "#DCB0F2", "#87C55F", "#9EB9F3",
 PASTEL = np.array([[int(h[i:i + 2], 16) for i in (1, 3, 5)] for h in PASTEL_HEX], dtype=np.uint8)
 BG_RGB = np.array([220, 220, 220], dtype=np.uint8)
 
-# Joint vector states: color, radius scale, head length scale, alpha
-STATE_STYLE = {
-    "Revolute": ((255, 255, 0), 1.3, 1.15, 1.0),
-    "Prismatic": ((0, 0, 255), 1.3, 1.15, 1.0),
-    "None": ("gray", 0.7, 0.7, 0.45),
+# Joint vector states: radius scale, head length scale, alpha (colors come from the active theme)
+STATE_SHAPE = {
+    "Revolute": (1.3, 1.15, 1.0),
+    "Prismatic": (1.3, 1.15, 1.0),
+    "None": (0.7, 0.7, 0.45),
 }
+
+
+def state_color(state: str) -> str:
+    t = theme.current()
+    return {"Revolute": t.revolute, "Prismatic": t.prismatic}.get(state, t.none)
 
 
 def pastel(label: int) -> np.ndarray:
@@ -53,8 +59,8 @@ def arrow_params(verts: np.ndarray, scale: float = 1.0):
 def state_arrow(center, n, state: str, size) -> vedo.Arrow:
     """Pickable joint-vector arrow styled by state ('None' | 'Revolute' | 'Prismatic')."""
     arrow_len, shaft_rad, head_rad, head_len = size[:4]
-    color, s, hs, alpha = STATE_STYLE.get(state, STATE_STYLE["None"])
-    arrow = vedo.Arrow(center, center + arrow_len * n, c=color, shaft_radius=shaft_rad * s,
+    s, hs, alpha = STATE_SHAPE.get(state, STATE_SHAPE["None"])
+    arrow = vedo.Arrow(center, center + arrow_len * n, c=state_color(state), shaft_radius=shaft_rad * s,
                        head_radius=head_rad * s, head_length=head_len * hs).lighting("off")
     arrow.pickable(True)
     arrow.alpha(alpha)
