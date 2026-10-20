@@ -19,6 +19,8 @@ from functions.gui.viewcube import HOME, ViewCube  # noqa: E402
 KEY_NAMES = {"Tab": "tab", "ISO_Left_Tab": "tab", "Return": "enter", "KP_Enter": "enter",
              "space": "space", "Escape": "escape"}
 HINTS_PER_ROW = 4
+# VTK's built-in overlay fonts have no glyphs for these; the Qt panel keeps the originals
+OVERLAY_ASCII = str.maketrans({"↔": "<->", "→": "->", "◂": "<", "▸": ">"})
 
 
 class _VTKWidget(QVTKRenderWindowInteractor):
@@ -141,13 +143,13 @@ class Viewport(QWidget):
         t, s = th.current(), self.scene
         self.overlays = []
         if s is not None and s.title:
-            text = f"{s.title}\n{s.hint}" if s.hint else s.title
+            text = (f"{s.title}\n{s.hint}" if s.hint else s.title).translate(OVERLAY_ASCII)
             self.overlays.append(vedo.Text2D(text, pos="top-left", s=0.85, c=t.text, bg=t.panel,
                                              alpha=0.85, font="Arial"))
         if s is not None and s.controls:
             items = [f"{k}  {v}" for k, v in s.controls]
             rows = ["     ".join(items[i:i + HINTS_PER_ROW]) for i in range(0, len(items), HINTS_PER_ROW)]
-            self.overlays.append(vedo.Text2D("\n".join(rows), pos="bottom-left", s=0.75, c=t.text2,
+            self.overlays.append(vedo.Text2D("\n".join(rows).translate(OVERLAY_ASCII), pos="bottom-left", s=0.75, c=t.text2,
                                              bg=t.panel, alpha=0.85, font="Arial"))
         if self.overlays:
             self.plt.add(*self.overlays)
