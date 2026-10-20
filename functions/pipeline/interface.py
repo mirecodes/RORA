@@ -14,13 +14,14 @@ from json_handler import JsonHandler
 
 from functions import stage_transform, stage_refine, stage_decompose, stage_segment, stage_articulate, stage_bind, \
     restore_transform
-from functions.utils.config import load_cfg, load_params
+from functions.gui.runner import STAGE_ORDER
+from functions.utils.config import load_object, load_params
 
 
 @dataclass
 class SystemConfigs():
-    """Built from cfgs/object_cfg.yml (what to process) and cfgs/parameters_cfg.yml + profile (how)."""
-    obj: dict = field(default_factory=lambda: load_cfg("object_cfg"))
+    """Built from cfgs/object_cfg.yml (what to process) and cfgs/parameters_cfg.yml + profiles (how)."""
+    obj: dict = field(default_factory=lambda: load_object())
     params: dict = field(default_factory=lambda: load_params())
     root_dir: str = field(default=project_root, init=False)
 
@@ -75,75 +76,20 @@ class SystemConfigs():
                 print(f"[error]: Failed to create directory {path}: {e}")
 
 
-import time
+STAGE_FUNCS = {
+    "align": lambda cfgs: restore_transform(cfgs) if cfgs.restore_align else stage_transform(cfgs),
+    "refine": lambda cfgs: stage_refine(cfgs, debug_mode=cfgs.debug_mode),
+    "decompose": stage_decompose,
+    "segment": stage_segment,
+    "articulate": stage_articulate,
+    "bind": stage_bind,
+}
+assert list(STAGE_FUNCS) == STAGE_ORDER
 
 
-def execute_pipeline(cfgs: SystemConfigs):
-    print("[info]: Execute the object importing pipeline")
-    
-    import functions
-    functions.total_gui_time = 0.0
-
-    stages_time = {}
-    pipeline_start = time.time()
-
-    if cfgs.stages["align"]:
-        start_time = time.time()
-        if cfgs.restore_align:
-            restore_transform(cfgs)
-            print("[info]: Restoring the alignment")
-            stages_time["Alignment/Restore"] = time.time() - start_time
-        else:
-            stage_transform(cfgs)
-            print("[info]: Running the alignment stage")
-            stages_time["Alignment"] = time.time() - start_time
-
-    if cfgs.stages["refine"]:
-        print("[info]: Running the refinement stage")
-        start_time = time.time()
-        stage_refine(cfgs, debug_mode=cfgs.debug_mode)
-        stages_time["Refinement"] = time.time() - start_time
-
-    if cfgs.stages["decompose"]:
-        print("[info]: Running the decomposition stage")
-        start_time = time.time()
-        stage_decompose(cfgs)
-        stages_time["Decomposition"] = time.time() - start_time
-
-    if cfgs.stages["segment"]:
-        print("[info]: Running the segmentation stage")
-        start_time = time.time()
-        stage_segment(cfgs)
-        stages_time["Segmentation"] = time.time() - start_time
-
-    if cfgs.stages["articulate"]:
-        print("[info]: Running the articulation stage")
-        start_time = time.time()
-        stage_articulate(cfgs)
-        stages_time["Articulation"] = time.time() - start_time
-
-    if cfgs.stages["bind"]:
-        print("[info]: Running the binding stage")
-        start_time = time.time()
-        stage_bind(cfgs)
-        stages_time["Binding"] = time.time() - start_time
-
-    total_time = time.time() - pipeline_start
-    gui_time = functions.total_gui_time
-    processing_time = max(0.0, total_time - gui_time)
-
-    print("\n" + "=" * 40)
-    print(f"{'Pipeline Execution Summary':^40}")
-    print("=" * 40)
-    for stage_name, duration in stages_time.items():
-        print(f"- {stage_name} stage: {duration:.2f}s")
-    print("-" * 40)
-    print(f"- Time spent in User GUI: {gui_time:.2f}s")
-    print(f"- Time spent in Processing (Waiting): {processing_time:.2f}s")
-    print("-" * 40)
-    print(f"Total elapsed time: {total_time:.2f}s")
-    print("=" * 40 + "\n")
-
+def run_stage(cfgs: SystemConfigs, name: str) -> None:
+    """Run one stage. Progress, interaction and timing go through functions.gui.bridge.ui()."""
+    STAGE_FUNCS[name](cfgs)
 
 
 def load_from_saves(cfgs: SystemConfigs, stage: str):
@@ -175,4 +121,5 @@ def load_from_saves(cfgs: SystemConfigs, stage: str):
 
 
 if __name__ == "__main__":
-    execute_pipeline(cfgs=SystemConfigs())
+    from functions.gui.app import main
+    sys.exit(main(sys.argv[1:]))
