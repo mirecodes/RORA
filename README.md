@@ -65,11 +65,13 @@ profile: real_object        # real_object (real scan) | partnet_object (PartNet 
 | Key | Description |
 |---|---|
 | `pipeline.stages.*` | Stage on/off. A stage can be skipped if its result is in `working/`. |
-| `pipeline.debug_mode` | Show intermediate results in a viewer. |
+| `pipeline.debug_mode` | Pause at intermediate results in the viewport (ignored with `--minimal`). |
 | `refine.method` | `pymeshlab` (default) or `point2mesh`. |
 | `decompose.coacd.threshold` | Lower = finer decomposition. |
 
 `cfgs/profiles/<profile>_params_cfg.yml` overrides `parameters_cfg.yml`, only for the keys it lists.
+An object profile saved from the GUI (`object_cfg.yml: object_profile`, stored in `cfgs/profiles/objects/`)
+is applied last and holds every stage setting for that object.
 
 ## 4. Run the pipeline
 
@@ -77,16 +79,24 @@ profile: real_object        # real_object (real scan) | partnet_object (PartNet 
 source .venv/bin/activate
 bash scripts/run_pipeline.sh
 # same as
-python functions/pipeline/interface.py
+python -m functions.gui.app
 ```
 
-Some stages open interactive GUI windows. Controls are also printed in the terminal.
+The pipeline runs in one window: a 3D viewport on the left, and on the right the stage timeline,
+the current interaction, the parameters, and the log. Press **▶ Run** to run the enabled stages.
+Hover a stage to **↻ re-run** it or **▶ run from** it; edit parameters first to re-run with new values.
+**Save object profile** writes every stage setting for this object to
+`cfgs/profiles/objects/<object>_<date>_<time>.yml` (shared yml files are never changed).
 
-- **align**: orient the object Z-up.
-  Rotate Z/Y/X: `U/I`, `H/J`, `B/N`. Move X/Y/Z: `W/S`, `D/A`, `Space/Z`. Save: `Q` or `Esc`.
-- **segment (parts)**: group convex fragments into parts.
-  `Tab` switches part, left click assigns, right click unassigns. Next: `Q` or `Esc`.
-- **articulate (joint axis)**: click an arrow to pick the joint type. Once = yellow (revolute), twice = blue (prismatic).
+- **align**: seat the object on z = 0 with Front along +X. Rotate X/Y/Z: `N/B`, `J/H`, `I/U`.
+  Move X/Y/Z: `W/S`, `D/A`, `Space/Z`. Or drag the gizmo, or type values in the panel. `Enter`: done.
+- **segment (parts)**: pick a part chip (or `Tab`), left click assigns a fragment, right click reverts.
+- **articulate (joint axis)**: click an arrow to cycle None → Revolute (amber) → Prismatic (blue);
+  `Enter` / **Next pair** moves through the part pairs.
+- Everywhere: the view cube (top right) snaps the camera to a face, edge, or corner; `R` resets the view,
+  `G` toggles the gizmo.
+
+`bash scripts/run_pipeline.sh --minimal` skips debug pauses and live rendering for timing runs.
 
 ### Output
 
@@ -103,11 +113,13 @@ working/<object_name>/
     └── vert_label.npy         # per-vertex part labels of the refined mesh (segment → articulate, bind)
 ```
 
-Per-stage timings are printed at the end.
+Per-stage timings (compute time excludes time spent waiting for input) are printed at the end and saved
+to `working/<object_name>/attributes/timing.json`.
 
 ### Example: rerun some stages
 
-To redo only part segmentation, set `cfgs/parameters_cfg.yml`:
+In the GUI, untick stages in the timeline or use ↻ / ▶ on a stage. Without the GUI checkboxes, set
+`cfgs/parameters_cfg.yml` to redo only part segmentation:
 
 ```yaml
 pipeline:

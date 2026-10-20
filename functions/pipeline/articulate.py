@@ -1,6 +1,5 @@
 import os
 import trimesh
-import vedo
 from typing import Dict, List, Tuple
 from collections import defaultdict
 
@@ -15,8 +14,8 @@ from functions.math.connection import fuse_connections, unicon_normal, merge_lin
 from functions.math.axis_estimation import estimate_unicons
 from functions.utils.mesh import append_patches, save_link_meshes
 from functions.utils.urdf import generate_urdf, joints_from_bicons
-from functions.visualize.plots import show_bicons
-from functions.visualize.select import select_joint_vectors
+from functions.gui.bridge import ui
+from functions.visualize.plots import show_bicons, show_links
 
 
 # =============================================================================
@@ -300,6 +299,9 @@ def stage_articulate(cfgs):
 
     print("=" * 60)
     print("[info] Starting stage_articulate...")
+    ui().plan([("load", "Load", True), ("unicons", "Unicons", True), ("fusion", "Fusion", True),
+               ("vectors", "Vector selection", True), ("links", "Link meshes", True), ("urdf", "URDF", True)])
+    ui().step("load")
 
     # load states, refined mesh & vertex labels
     print("[info] Loading states, base mesh and vertex labels...")
@@ -320,6 +322,7 @@ def stage_articulate(cfgs):
     adj = adjacency(faces, len(verts))
 
     # axis estimation + fusion + vectors
+    ui().step("unicons")
     print("[info] Estimating unidirectional connections (unicons)...")
     unicons = compute_unicons(
         verts, faces, parts_num, adj, vert_label,
@@ -327,6 +330,7 @@ def stage_articulate(cfgs):
         **artCfgs["axis_estimation"]
     )
 
+    ui().step("fusion")
     print("[info] Fusing unicons into bidirectional connections (bicons)...")
     bicons = fuse_connections(unicons, **artCfgs["fusion"])
 
@@ -342,28 +346,17 @@ def stage_articulate(cfgs):
     prepare_vectors_for_bicons(bicons)
     augment_vectors_for_pairs_with_map(bicons, min_count=artCfgs["vector_augment_min_count"])  # optional
 
-    # vector selection UI (part-pair-wise)
-    if cfgs.debug_mode:
-        print("=" * 60)
-        print("VECTOR SELECTION STAGE CONTROLS (Per Part-Pair Window):")
-        print("  Mouse:")
-        print("    Left Click on Vector : Toggle state (None -> Revolute -> Prismatic -> None)")
-        print("  Keyboard (Applies to ALL vectors in current window):")
-        print("    W / S     : Move along X axis")
-        print("    D / A     : Move along Y axis")
-        print("    Space / Z : Move along Z axis")
-        print("    N / B     : Rotate around X axis")
-        print("    H / J     : Rotate around Y axis")
-        print("    U / I     : Rotate around Z axis")
-        print("    Q / Esc   : Finish current window")
-        print("=" * 60)
-
+    # vector selection in the viewport (all part pairs in one scene)
+    ui().step("vectors")
     print("[info] Starting interactive vector selection...")
-    select_joint_vectors(bicons, verts, faces, vert_label)
+    if bicons:
+        from functions.gui.scenes import JointSelectScene  # GUI-only import
+        ui().interact(JointSelectScene(bicons, verts, faces, vert_label))
     print("[info] Vector selection finished.")
     joints = joints_from_bicons(bicons)
 
     # per-link meshes + patch fill
+    ui().step("links")
     print("[info] Saving link meshes...")
     link_dir = os.path.join(cfgs.mesh_working_dir, "links")
     link_mesh_paths = save_link_meshes(verts, faces, vert_label, parts_num, link_dir)
@@ -384,6 +377,7 @@ def stage_articulate(cfgs):
         print("[error]: No link meshes were generated.")
         return
 
+    ui().step("urdf")
     # Generate URDF File (urdf_name / density / mesh_fmt from parameters_cfg.yml)
     urdf_dir = generate_urdf(
         closed_parts=links,
@@ -394,10 +388,8 @@ def stage_articulate(cfgs):
     )
     print(f"[info]: the urdf file has been generated in: {urdf_dir}")
 
-    # Vedo viewer of the articulated object
-    if cfgs.debug_mode:
-        actors = [vedo.Mesh([m.vertices, m.faces]).c('lightblue').alpha(0.5) for _, m in sorted(links.items())]
-        vedo.show(actors, "Loaded link meshes", axes=1).close()
+    # Debug checkpoint: the articulated object's link meshes
+    show_links(links)
 
     print("[info] stage_articulate finished successfully.")
     print("=" * 60)

@@ -6,8 +6,9 @@ import trimesh
 
 from json_handler import JsonHandler
 from functions.math.graph import label_vertices
+from functions.gui.bridge import ui
+from functions.gui.models import group_fragments
 from functions.visualize.plots import show_labels
-from functions.visualize.select import select_parts
 
 
 # =============================================================================
@@ -24,6 +25,9 @@ def stage_segment(cfgs):
 
     print("=" * 60)
     print("[info] Starting stage_segment...")
+    ui().plan([("load", "Load", True), ("select", "Part selection", True), ("label", "Vertex labeling", True),
+               ("save", "Save", True)])
+    ui().step("load")
 
     # load states & base mesh
     print("[info] Loading states and base mesh...")
@@ -40,20 +44,12 @@ def stage_segment(cfgs):
 
     parts_num = cfgs.parts_num
 
-    # selection UI
-    if cfgs.debug_mode:
-        print("=" * 60)
-        print("PART SELECTION STAGE CONTROLS:")
-        print("  Mouse:")
-        print("    Left Click  : Assign fragment to current part")
-        print("    Right Click : Revert assignment")
-        print("  Keyboard:")
-        print("    Tab         : Cycle selection mode (Part 1 -> 2 -> ... -> 0)")
-        print("    Q / Esc     : Finish and Proceed")
-        print("=" * 60)
-
+    # part selection in the viewport
+    ui().step("select")
     print("[info] Starting interactive part selection...")
-    parts = select_parts(fragments, verts, faces, parts_num)
+    from functions.gui.scenes import PartSelectScene  # GUI-only import keeps this module importable headless
+    owner = ui().interact(PartSelectScene([(f.vertices, f.faces) for f in fragments], verts, faces, parts_num))
+    parts = group_fragments(fragments, owner, parts_num)
     print("[info] Part selection finished.")
 
     # --- Compact parts by removing empty ones (keeping index 0) ---
@@ -74,6 +70,7 @@ def stage_segment(cfgs):
         print("[warn] No fragments assigned.")
 
     # vertex labels
+    ui().step("label")
     print("[info] Classifying vertices...")
     vert_label = label_vertices(verts, parts, **segCfgs["labeling"]).astype(int)
     print("[info] Classification finished.")
@@ -81,6 +78,7 @@ def stage_segment(cfgs):
     if cfgs.debug_mode:
         show_labels(verts, faces, vert_label)
 
+    ui().step("save")
     # persist: per-vertex part labels of the refined mesh (states.refine.dirs.mesh vertex order)
     print("[info] Persisting states...")
     vert_label_path = os.path.join(cfgs.json_attr_dir, "vert_label.npy")

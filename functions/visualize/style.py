@@ -1,5 +1,3 @@
-import time
-
 import numpy as np
 import vedo
 
@@ -66,12 +64,3 @@ def state_arrow(center, n, state: str, size) -> vedo.Arrow:
     arrow.alpha(alpha)
     arrow.vec_state = state
     return arrow
-
-
-def timed_show(plt, *args, **kwargs):
-    """plt.show() that adds the blocking GUI time to functions.total_gui_time."""
-    import functions
-    t0 = time.time()
-    out = plt.show(*args, **kwargs)
-    functions.total_gui_time += time.time() - t0
-    return out
