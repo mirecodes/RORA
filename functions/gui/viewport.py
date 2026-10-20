@@ -57,6 +57,7 @@ class Viewport(QWidget):
                        ("RightButtonPressEvent", self._right_press), ("MouseMoveEvent", self._move),
                        ("KeyPressEvent", self._key)):
             self._tags[ev] = self.iren.AddObserver(ev, fn, 10.0)
+        self.cube.set_view(HOME)  # start in the same isometric view R returns to
         self.apply_theme(th.current())
 
     # --- event routing ---

@@ -85,8 +85,10 @@ class StageRow(QWidget):
         header = QHBoxLayout()
         header.setContentsMargins(0, 2, 0, 2)
         header.setSpacing(8)
-        for w in (self.check, self.dot, self.name):
-            header.addWidget(w)
+        header.addWidget(self.check)
+        header.addSpacing(4)
+        header.addWidget(self.dot)
+        header.addWidget(self.name)
         header.addStretch()
         for w in (self.summary, self.rerun_btn, self.from_btn):
             header.addWidget(w)

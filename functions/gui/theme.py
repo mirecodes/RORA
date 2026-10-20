@@ -76,6 +76,9 @@ QToolButton {{ background: transparent; border: none; color: {t.text2}; padding:
 QToolButton:hover {{ color: {t.text}; }}
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{ background: {t.button}; color: {t.text}; border: 1px solid {t.line}; border-radius: 4px; padding: 2px 6px; }}
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{ border-color: {t.accent}; }}
+QCheckBox::indicator {{ width: 12px; height: 12px; border: 1px solid {t.text3}; border-radius: 3px; background: {t.button}; }}
+QCheckBox::indicator:checked {{ background: {t.accent}; border-color: {t.accent}; }}
+QCheckBox::indicator:disabled {{ border-color: {t.line}; }}
 QPlainTextEdit {{ background: {t.bg}; color: {t.text2}; border: 1px solid {t.line}; font-family: Menlo, monospace; font-size: 11px; }}
 QScrollArea {{ border: none; }}
 QSplitter::handle {{ background: {t.line}; }}
