@@ -6,6 +6,7 @@ from pymeshlab import PercentageValue
 from json_handler import JsonHandler
 
 from functions.utils.mesh import repair_mesh, flatten_bottom_hole, fill_bottom_hole
+from functions.gui.bridge import ui
 from functions.visualize.plots import show_meshset
 
 
@@ -33,6 +34,8 @@ def stage_refine(cfgs, debug_mode: bool = False):
 
 
 def run_point2mesh_refinement(cfgs, input_mesh_path: str = None, debug_mode: bool = False):
+    ui().plan([("p2m_prepare", "Prepare", True), ("point2mesh", "point2mesh", True), ("p2m_save", "Save", True)])
+    ui().step("p2m_prepare")
     p2m_cfgs = cfgs.params["refine"]["point2mesh"]
     states = JsonHandler(cfgs.json_states_dir, auto_save=False)
     raw_mesh_in = input_mesh_path if input_mesh_path else states.transform.dirs.mesh
@@ -70,16 +73,20 @@ def run_point2mesh_refinement(cfgs, input_mesh_path: str = None, debug_mode: boo
     ]
 
     print(f"[point2mesh]: Running command: {' '.join(cmd)}")
+    ui().step("point2mesh")
     import subprocess
-    result = subprocess.run(cmd, cwd=p2m_dir, capture_output=True, text=True)
-
-    if result.returncode != 0:
-        print(f"[point2mesh warning]: point2mesh failed with stdout:\n{result.stdout}\nstderr:\n{result.stderr}")
+    proc = subprocess.Popen(cmd, cwd=p2m_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                            bufsize=1)
+    for line in proc.stdout:  # stream to the terminal / log panel while it runs
+        print(f"[point2mesh] {line.rstrip()}")
+    if proc.wait() != 0:
+        print(f"[point2mesh warning]: point2mesh exited with code {proc.returncode} (output above).")
         print("[point2mesh warning]: Falling back to PyMeshLab refinement.")
         run_pymeshlab_refinement(cfgs, debug_mode=debug_mode)
         return
 
     # Check output mesh
+    ui().step("p2m_save")
     recon_obj = os.path.join(save_dir, "last_recon.obj")
     if os.path.exists(recon_obj):
         # Convert OBJ output to target extension (e.g., PLY) using pymeshlab
@@ -98,9 +105,19 @@ def run_point2mesh_refinement(cfgs, input_mesh_path: str = None, debug_mode: boo
     states.refine.dirs = {"mesh": mesh_out_dir}
 
 
+PYMESHLAB_STEPS = [("cleaning", "① Cleaning"), ("reconstruction", "② Poisson"),
+                   ("vertex_selection", "③ Artifact removal"), ("decimation", "④ Simplification"),
+                   ("remeshing", "⑤ Remeshing"), ("occlusion_repair", "⑥ Occlusion repair"),
+                   ("close_holes", "⑦ Hole closing"), ("attribute_transfer", "⑧ Attribute restoration")]
+
+
 def run_pymeshlab_refinement(cfgs, debug_mode: bool = False):
     # Load configurations
     refCfgs = cfgs.params["refine"]["pymeshlab"]
+    enabled = {k: bool(refCfgs["steps"].get(k, True)) for k, _ in PYMESHLAB_STEPS}
+    ui().plan([("load", "Load", True)] + [(k, label, enabled[k]) for k, label in PYMESHLAB_STEPS]
+              + [("save", "Save", True)])
+    ui().step("load")
     states = JsonHandler(cfgs.json_states_dir, auto_save=False)
 
     # Load meshes
@@ -115,6 +132,7 @@ def run_pymeshlab_refinement(cfgs, debug_mode: bool = False):
 
     # 1) Cleaning: remove small connected components
     if refCfgs["steps"].get("cleaning", True):
+        ui().step("cleaning")
         ms.meshing_remove_connected_component_by_diameter(
             **_pct(refCfgs["params"]["meshing_remove_connected_component_by_diameter"])
         )
@@ -122,6 +140,7 @@ def run_pymeshlab_refinement(cfgs, debug_mode: bool = False):
 
     # 2) Reconstruction: Screened Poisson
     if refCfgs["steps"].get("reconstruction", True):
+        ui().step("reconstruction")
         ms.generate_surface_reconstruction_screened_poisson(
             **_pct(refCfgs["params"]["generate_surface_reconstruction_screened_poisson"])
         )
@@ -129,6 +148,7 @@ def run_pymeshlab_refinement(cfgs, debug_mode: bool = False):
 
     # 3) Vertex selection (cut-off)
     if refCfgs["steps"].get("vertex_selection", True):
+        ui().step("vertex_selection")
         ms.compute_selection_by_condition_per_vertex(
             **_pct(refCfgs["params"]["compute_selection_by_condition_per_vertex"])
         )
@@ -138,6 +158,7 @@ def run_pymeshlab_refinement(cfgs, debug_mode: bool = False):
 
     # 4) Decimation (edge collapse)
     if refCfgs["steps"].get("decimation", True):
+        ui().step("decimation")
         ms.meshing_decimation_quadric_edge_collapse(
             **_pct(refCfgs["params"]["meshing_decimation_quadric_edge_collapse"])
         )
@@ -145,6 +166,7 @@ def run_pymeshlab_refinement(cfgs, debug_mode: bool = False):
 
     # 5) Remeshing (isotropic explicit)
     if refCfgs["steps"].get("remeshing", True):
+        ui().step("remeshing")
         ms.meshing_isotropic_explicit_remeshing(
             **_pct(refCfgs["params"]["meshing_isotropic_explicit_remeshing"])
         )
@@ -155,6 +177,7 @@ def run_pymeshlab_refinement(cfgs, debug_mode: bool = False):
 
     # Infill bottom occlusion
     if refCfgs["steps"].get("occlusion_repair", True):
+        ui().step("occlusion_repair")
         if refCfgs["do_flatten_bottom"]:
             ms = flatten_bottom_hole(ms, target_z=0.0)
             ms = fill_bottom_hole(ms)
@@ -165,6 +188,7 @@ def run_pymeshlab_refinement(cfgs, debug_mode: bool = False):
 
     # 6) Close holes
     if refCfgs["steps"].get("close_holes", True):
+        ui().step("close_holes")
         ms.meshing_close_holes(
             **_pct(refCfgs["params"]["meshing_close_holes"])
         )
@@ -175,6 +199,7 @@ def run_pymeshlab_refinement(cfgs, debug_mode: bool = False):
 
     # 7) Restore vertex colors (attribute transfer)
     if refCfgs["steps"].get("attribute_transfer", True):
+        ui().step("attribute_transfer")
         ms.load_new_mesh(mesh_in_dir) # This is the source mesh (index 1)
         ms.set_current_mesh(0) # Target mesh is the refined one
 
@@ -190,6 +215,7 @@ def run_pymeshlab_refinement(cfgs, debug_mode: bool = False):
     # --------------------------------------------------------------------------
     # Save the Refined Mesh
     # --------------------------------------------------------------------------
+    ui().step("save")
     mesh_out_dir = os.path.join(cfgs.mesh_working_dir, f"refined_mesh.{cfgs.extension}")
     ms.save_current_mesh(mesh_out_dir)
 

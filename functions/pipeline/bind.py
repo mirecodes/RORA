@@ -8,6 +8,8 @@ from scipy.spatial import cKDTree
 from scipy.spatial.transform import Rotation as R
 from plyfile import PlyData, PlyElement
 
+from functions.gui.bridge import ui
+
 
 # ------------------------------ helpers ---------------------------------------
 
@@ -178,6 +180,9 @@ def stage_bind(cfgs):
       - Drop Gaussians whose nearest vertex is too far
       - Save per-part PLYs, preserving all original fields/elements
     """
+    ui().plan([("load", "Load", True), ("zcut", "Z-cut", True), ("knn", "KNN assignment", True),
+               ("save", "Save", True)])
+    ui().step("load")
     print(f"[Info] Creating output directory: {cfgs.gaussian_out_dir}")
     os.makedirs(cfgs.gaussian_out_dir, exist_ok=True)
 
@@ -214,6 +219,7 @@ def stage_bind(cfgs):
     bind_cfgs = cfgs.params["bind"]
 
     # --- Z cut by relative threshold to mesh diagonal ---
+    ui().step("zcut")
     diag = float(np.linalg.norm(mesh.bounds[1] - mesh.bounds[0]))
     z_cut = bind_cfgs["z_cut_rel"] * diag
     keep_z = gauss_xyz[:, 2] >= z_cut
@@ -228,6 +234,7 @@ def stage_bind(cfgs):
         return
 
     # --- KNN assignment on z-kept points ---
+    ui().step("knn")
     print(f"[Info] Running KNN assignment for {len(xyz_kept)} points...")
     assigned_kept = _assign_parts_knn3(
         mesh, vert_labels, xyz_kept,
@@ -244,6 +251,7 @@ def stage_bind(cfgs):
         print("[assign-knn3] label counts (including -1 excluded):", dict(zip(uniq.tolist(), cnts.tolist())))
 
     # Save per-part except -1
+    ui().step("save")
     keep = (assigned != -1)
     part_ids = np.unique(assigned[keep])
 

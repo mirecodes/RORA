@@ -3,13 +3,11 @@ import numpy as np
 import plyfile
 import pymeshlab
 import trimesh
-import vedo
 from plyfile import PlyData, PlyElement
 from json_handler import JsonHandler
-from functools import partial
 
+from functions.gui.bridge import ui
 from functions.utils.mesh import align_transform
-from functions.visualize.style import timed_show
 
 
 # ----------------------- small linear algebra helpers ------------------------
@@ -99,29 +97,6 @@ def _rotate_gaussian_quats(vertex_el, Rmat: np.ndarray) -> bool:
     return changed
 
 
-# --------------------------- vedo assembly helper ----------------------------
-
-def _shift_assembly(assembly, dx=0.0, dy=0.0, dz=0.0):
-    """Translate the whole assembly by (dx,dy,dz) in world frame."""
-    try:
-        assembly.shift(dx, dy, dz)
-        return
-    except Exception:
-        pass
-    try:
-        for a in getattr(assembly, "actors", []):
-            try:
-                a.shift(dx, dy, dz)
-            except Exception:
-                pass
-    except Exception:
-        try:
-            x, y, z = assembly.pos()
-            assembly.pos(x + dx, y + dy, z + dz)
-        except Exception:
-            pass
-
-
 # -------------------------- mesh export with T applied -----------------------
 
 def save_mesh_with_transform(ms_mesh: pymeshlab.Mesh, out_path: str, T4: np.ndarray):
@@ -204,53 +179,14 @@ def save_gaussian_with_transform(ply: plyfile.PlyData, gaussian_out_path: str, T
     _write_ply_preserve_all(ply, v, gaussian_out_path)
 
 
-# ------------------------------ key callback ---------------------------------
-
-def key_press_callback(e, *, assembly=None, plt=None, angle_step: float = 1.0, trans_step: float = 1.0):
-    """
-    Rotation: U/I (Z-), H/J (Y-), B/N (X-)
-    Translation: W/S (+/-X), D/A (+/-Y), Space/Z (+/-Z)
-    Exit: q, esc
-    """
-    key_raw = getattr(e, "keypress", "") or ""
-    k = key_raw.lower()
-
-    if k in ("q", "esc", "escape"):
-        try:
-            plt.close()
-        except Exception:
-            vedo.close()
-        return
-
-    # rotation
-    if   k == "u": assembly.rotate_z(-angle_step)
-    elif k == "i": assembly.rotate_z(+angle_step)
-    elif k == "h": assembly.rotate_y(-angle_step)
-    elif k == "j": assembly.rotate_y(+angle_step)
-    elif k == "b": assembly.rotate_x(-angle_step)
-    elif k == "n": assembly.rotate_x(+angle_step)
-
-    # translation
-    elif k == "w": _shift_assembly(assembly, +trans_step, 0.0, 0.0)
-    elif k == "s": _shift_assembly(assembly, -trans_step, 0.0, 0.0)
-    elif k == "d": _shift_assembly(assembly, 0.0, +trans_step, 0.0)
-    elif k == "a": _shift_assembly(assembly, 0.0, -trans_step, 0.0)
-    elif k in (" ", "space"): _shift_assembly(assembly, 0.0, 0.0, +trans_step)
-    elif k == "z": _shift_assembly(assembly, 0.0, 0.0, -trans_step)
-    else:
-        return
-
-    try:
-        plt.render()
-    except Exception:
-        pass
-
-
 # ------------------------------- main stage ----------------------------------
 
 def stage_transform(cfgs):
     tf_cfgs = cfgs.params["transform"]
+    ui().plan([("load", "Load", True), ("auto", "Auto-align", bool(tf_cfgs["use_auto_alignment"])),
+               ("manual", "Manual adjust", True), ("save", "Save", True)])
 
+    ui().step("load")
     ms = pymeshlab.MeshSet()
     try:
         ms.load_new_mesh(cfgs.mesh_in_dir)
@@ -263,6 +199,7 @@ def stage_transform(cfgs):
     mesh = ms.mesh(0)
     
     if tf_cfgs["use_auto_alignment"]:
+        ui().step("auto")
         initial_transform = align_transform(ms)  # 4x4
         if initial_transform is None:
             print("[Warning] Auto-alignment failed. Using Identity.")
@@ -271,77 +208,23 @@ def stage_transform(cfgs):
         print("[Info] Auto-alignment disabled. Using Identity.")
         initial_transform = np.eye(4)
 
-    # visualize mesh with initial_transform (view-only)
-    verts = mesh.vertex_matrix()
-    faces = mesh.face_matrix()
+    # Manual adjustment in the viewport; rotations pivot on the world origin (ground plane stays put)
+    ui().step("manual")
+    verts, faces = mesh.vertex_matrix(), mesh.face_matrix()
     R0 = initial_transform[:3, :3].astype(np.float64)
     t0 = initial_transform[:3, 3].astype(np.float64)
-
     verts_vis = apply_Rt_points(verts.astype(np.float64), R0, t0)
-    vmesh = vedo.Mesh([verts_vis, faces], alpha=0.5)
-
+    point_colors = cell_colors = None
     if mesh.has_vertex_color():
-        vmesh.pointcolors = mesh.vertex_color_matrix()[:, :3] * 255
+        point_colors = (mesh.vertex_color_matrix()[:, :3] * 255).astype(np.uint8)
     elif mesh.has_face_color():
-        vmesh.cellcolors = mesh.face_color_matrix()[:, :3] * 255
-    else:
-        vmesh.color("lightblue")
-
-    assembly = vedo.Assembly((vmesh,))
-    bounds = vmesh.bounds()
-    max_len = max(bounds[1]-bounds[0], bounds[3]-bounds[2], bounds[5]-bounds[4])
-    axis_len = max_len * 0.8
-
-    axes = [
-        vedo.Line([0,0,0], [axis_len,0,0], c='red', lw=3),
-        vedo.Line([0,0,0], [0,axis_len,0], c='green', lw=3),
-        vedo.Line([0,0,0], [0,0,axis_len], c='blue', lw=3),
-        vedo.Grid(pos=(0,0,0), s=(max_len*1.2, max_len*1.2), alpha=0.15)
-    ]
-    plt = vedo.Plotter(title="Mesh Transform", size=(1800, 1200))
-
-    # disable default VTK keybindings
-    try:
-        iren = plt.interactor
-        for _ev in ("KeyPressEvent", "KeyReleaseEvent", "CharEvent"):
-            iren.RemoveObservers(_ev)
-    except Exception:
-        pass
-
-    trans_step = max_len * 0.02 if np.isfinite(max_len) and max_len > 0 else 1.0
-
-    handler = partial(
-        key_press_callback,
-        assembly=assembly,
-        plt=plt,
-        angle_step=1.0,
-        trans_step=trans_step,
-    )
-    plt.add_callback('KeyPress', handler)
-
-    plt.add(assembly, *axes)
-
-    print("=" * 60)
-    print("TRANSFORM STAGE CONTROLS:")
-    print("  Rotation:")
-    print("    U / I : Rotate around Z axis")
-    print("    H / J : Rotate around Y axis")
-    print("    B / N : Rotate around X axis")
-    print("  Translation:")
-    print("    W / S : Move along X axis")
-    print("    D / A : Move along Y axis")
-    print("    Space / Z : Move along Z axis")
-    print("  General:")
-    print("    Q / Esc : Finish and Save")
-    print("=" * 60)
-
-    timed_show(plt, interactive=True)
+        cell_colors = (mesh.face_color_matrix()[:, :3] * 255).astype(np.uint8)
+    from functions.gui.scenes import AlignScene  # GUI-only import keeps this module importable headless
+    fine_M = ui().interact(AlignScene(verts_vis, faces, point_colors, cell_colors))
 
     # accumulate transforms: project each to pure rotation before composing
-    fine_transform = getattr(assembly, "transform", None)
-    fine_M = fine_transform.matrix if fine_transform is not None else np.eye(4, dtype=float)
-
-    fine_M = _closest_rotation(fine_M)
+    ui().step("save")
+    fine_M = _closest_rotation(np.asarray(fine_M, dtype=float))
     initial_transform = _closest_rotation(initial_transform)
 
     # NOTE: If orientation is still off, try swapping the order below.
@@ -363,12 +246,7 @@ def stage_transform(cfgs):
     states.transform = {}
     states.transform.matrix = total_T.tolist()
     states.transform.dirs = {"mesh": mesh_out, "gaussian": gaussian_out}
-
-    try:
-        ms.clear()
-        vedo.close()
-    except Exception:
-        pass
+    ms.clear()
 
     return
 
@@ -405,6 +283,9 @@ def restore_transform(cfgs, *, overwrite: bool = True, suffix: str = "restored")
     - overwrite: if True, overwrite the same filenames used by stage_transform
     - suffix: filename suffix when overwrite=False (default: *_restored.ext)
     """
+    ui().plan([("load", "Load", True), ("restore", "Restore", True), ("save", "Save", True)])
+    ui().step("load")
+
     # 1) Load transform from states
     T4 = _load_T_from_states(cfgs.json_states_dir)
     T4 = _closest_rotation(T4)  # safety: remove shear/scale
@@ -428,6 +309,7 @@ def restore_transform(cfgs, *, overwrite: bool = True, suffix: str = "restored")
         raise FileNotFoundError(f"[error]: Failed to load mesh: {cfgs.mesh_in_dir}") from e
 
     # 4) Apply & save mesh
+    ui().step("restore")
     mesh = ms.current_mesh()
     save_mesh_with_transform(mesh, mesh_out, T4)
 
@@ -446,6 +328,7 @@ def restore_transform(cfgs, *, overwrite: bool = True, suffix: str = "restored")
         gaussian_out = None
 
     # 6) Persist outputs (do not overwrite matrix; only update dirs)
+    ui().step("save")
     states = JsonHandler(cfgs.json_states_dir, auto_save=True)
     if not hasattr(states, "transform") or states.transform is None:
         states.transform = {}

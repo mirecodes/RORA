@@ -29,6 +29,11 @@ class _VTKWidget(QVTKRenderWindowInteractor):
     def focusNextPrevChild(self, next):  # noqa: N802 (Qt API name)
         return False
 
+    def _getPixelRatio(self):  # noqa: N802 (VTK API name)
+        """Ratio of the screen this widget is on. VTK's version uses the screen under the mouse cursor,
+        which mis-sizes the render window when the app opens on another monitor."""
+        return self.devicePixelRatioF()
+
 
 class Viewport(QWidget):
     def __init__(self, parent=None):
@@ -45,8 +50,10 @@ class Viewport(QWidget):
         for ev in ("KeyPressEvent", "KeyReleaseEvent", "CharEvent"):  # drop VTK/vedo default key bindings
             self.iren.RemoveObservers(ev)
 
-        dpr = self.devicePixelRatioF()
-        self.cube = ViewCube(self.renderer, self.plt.window, self.render, dpr)
+        # Runs before the cube/gizmo sync: follow the current screen's pixel ratio (windows can move
+        # between a Retina display and a 1x monitor), otherwise text and the cube render at the wrong size.
+        self.renderer.AddObserver("StartEvent", self._sync_dpr, 100.0)
+        self.cube = ViewCube(self.renderer, self.plt.window, self.render, self.vtk.devicePixelRatioF())
         self.gizmo = TransformGizmo(self.renderer, self.plt.window, self._on_gizmo_delta, self.render)
         self.scene = None
         self.actors = []
@@ -59,6 +66,12 @@ class Viewport(QWidget):
             self._tags[ev] = self.iren.AddObserver(ev, fn, 10.0)
         self.cube.set_view(HOME)  # start in the same isometric view R returns to
         self.apply_theme(th.current())
+
+    def _sync_dpr(self, *_) -> None:
+        dpr = self.vtk.devicePixelRatioF()
+        self.cube.dpr = dpr
+        if self.plt.window.GetDPI() != round(72 * dpr):
+            self.plt.window.SetDPI(round(72 * dpr))
 
     # --- event routing ---
     def _swallow(self, ev: str) -> None:
