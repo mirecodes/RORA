@@ -1,7 +1,7 @@
 import numpy as np
 
 from functions.gui.gizmo import axis_drag_distance, ring_drag_angle
-from functions.gui.viewcube import piece_at, slerp, view_for
+from functions.gui.viewcube import piece_at, ray_box, slerp, view_for
 
 
 def test_piece_at_face_edge_corner():
@@ -9,6 +9,13 @@ def test_piece_at_face_edge_corner():
     assert piece_at([0.5, 0.45, 0.0]) == (1, 1, 0)
     assert piece_at([-0.5, -0.45, 0.48]) == (-1, -1, 1)
     assert piece_at([0.0, 0.0, 0.0]) is None
+
+
+def test_ray_box_hits_nearest_face():
+    assert np.allclose(ray_box([3.0, 0.1, 0.2], [-1.0, 0, 0]), [0.5, 0.1, 0.2])
+    assert np.allclose(ray_box([0.2, 0.0, 3.0], [0, 0, -1.0]), [0.2, 0.0, 0.5])
+    assert ray_box([3.0, 2.0, 0.0], [-1.0, 0, 0]) is None   # passes beside the cube
+    assert ray_box([3.0, 0.0, 0.0], [1.0, 0, 0]) is None    # points away
 
 
 def test_view_for_up_vectors():

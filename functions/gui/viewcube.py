@@ -5,7 +5,7 @@ import numpy as np
 from PySide6.QtCore import QTimer
 from vtkmodules.vtkFiltersSources import vtkCubeSource
 from vtkmodules.vtkRenderingAnnotation import vtkAnnotatedCubeActor
-from vtkmodules.vtkRenderingCore import vtkActor, vtkCellPicker, vtkPolyDataMapper, vtkRenderer
+from vtkmodules.vtkRenderingCore import vtkActor, vtkPolyDataMapper, vtkRenderer
 
 from functions.gui import theme as th
 
@@ -21,6 +21,19 @@ def piece_at(point, half: float = 0.5, band: float = BAND):
     p = np.asarray(point, dtype=float) / half
     piece = tuple(int(np.sign(c)) if abs(c) > band else 0 for c in p)
     return piece if any(piece) else None
+
+
+def ray_box(origin, direction, half: float = 0.5):
+    """Nearest hit of a ray with the axis-aligned cube [-half, half]^3 (slab method), or None.
+    Used instead of a VTK picker, which cannot pick inside vtkAnnotatedCubeActor."""
+    o, d = np.asarray(origin, dtype=float), np.asarray(direction, dtype=float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        t1, t2 = (-half - o) / d, (half - o) / d
+    t_near = np.nanmax(np.minimum(t1, t2))
+    t_far = np.nanmin(np.maximum(t1, t2))
+    if t_near > t_far or t_far < 0:
+        return None
+    return o + d * max(t_near, 0.0)
 
 
 def view_for(piece) -> tuple[np.ndarray, np.ndarray]:
@@ -80,6 +93,7 @@ class ViewCube:
         self.cube.SetZPlusFaceText("Top")
         self.cube.SetZMinusFaceText("Bottom")
         self.cube.SetFaceTextScale(0.16)
+        self.cube.SetZFaceTextRotation(-90)  # read "Top" upright when Front (+X) faces the viewer
         self.cube.SetTextEdgesVisibility(False)
         self.ren.AddActor(self.cube)
 
@@ -94,8 +108,6 @@ class ViewCube:
         self.highlight.GetProperty().LightingOff()
         self.ren.AddActor(self.highlight)
 
-        self.picker = vtkCellPicker()
-        self.picker.SetTolerance(0.0005)
         self._hover = None
         self._timer = None
         self.set_theme(th.current())
@@ -127,10 +139,18 @@ class ViewCube:
     def contains(self, x, y) -> bool:
         return bool(self.ren.IsInViewport(int(x), int(y)))
 
+    def _world(self, x, y, z) -> np.ndarray:
+        self.ren.SetDisplayPoint(float(x), float(y), z)
+        self.ren.DisplayToWorld()
+        p = np.array(self.ren.GetWorldPoint())
+        return p[:3] / p[3]
+
     def _pick(self, x, y):
-        if not self.contains(x, y) or not self.picker.Pick(x, y, 0, self.ren):
+        if not self.contains(x, y):
             return None
-        return piece_at(self.picker.GetPickPosition())
+        near, far = self._world(x, y, 0.0), self._world(x, y, 1.0)
+        hit = ray_box(near, far - near)
+        return None if hit is None else piece_at(hit)
 
     def _show_highlight(self, piece) -> None:
         if piece is None:
