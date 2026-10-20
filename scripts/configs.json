@@ -1,7 +1,11 @@
 {
-  "object_name": "toilet",
+  "object_name": "proto_toolbox", 
   "extension": "ply",
   "parts": {
-    "num": 5
+    "num": 5      
+  },
+  "vector_scale": {
+    "length_factor": 0.5,
+    "thickness_factor": 0.5
   }
 }

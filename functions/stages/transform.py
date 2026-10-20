@@ -7,6 +7,7 @@ import vedo
 from plyfile import PlyData, PlyElement
 from json_handler import JsonHandler
 from functools import partial
+from dataclasses import dataclass
 
 from functions import calculate_transforms
 
@@ -247,7 +248,19 @@ def key_press_callback(e, *, assembly=None, plt=None, angle_step: float = 1.0, t
 
 # ------------------------------- main stage ----------------------------------
 
-def stage_transform(cfgs):
+@dataclass
+class TransformConfig:
+    """
+    Configuration for the transform stage.
+    """
+    use_auto_alignment: bool = True  # If True, attempts to align mesh using PCA/RANSAC (z-up).
+                                     # If False, uses the original coordinate system (Identity).
+    gaussian_scale: float = 100.0      # Scale factor for Gaussian positions (e.g. 100.0 for m->cm conversion)
+
+def stage_transform(cfgs, transform_config: TransformConfig = None):
+    if transform_config is None:
+        transform_config = TransformConfig()
+
     ms = pymeshlab.MeshSet()
     try:
         ms.load_new_mesh(cfgs.mesh_in_dir)
@@ -258,7 +271,15 @@ def stage_transform(cfgs):
         raise FileNotFoundError()
 
     mesh = ms.mesh(0)
-    initial_transform = calculate_transforms(ms)  # 4x4
+    
+    if transform_config.use_auto_alignment:
+        initial_transform = calculate_transforms(ms)  # 4x4
+        if initial_transform is None:
+            print("[Warning] Auto-alignment failed. Using Identity.")
+            initial_transform = np.eye(4)
+    else:
+        print("[Info] Auto-alignment disabled. Using Identity.")
+        initial_transform = np.eye(4)
 
     # visualize mesh with initial_transform (view-only)
     verts = mesh.vertex_matrix()
@@ -287,7 +308,7 @@ def stage_transform(cfgs):
         vedo.Line([0,0,0], [0,0,axis_len], c='blue', lw=3),
         vedo.Grid(pos=(0,0,0), s=(max_len*1.2, max_len*1.2), alpha=0.15)
     ]
-    plt = vedo.Plotter(title="Mesh Transform")
+    plt = vedo.Plotter(title="Mesh Transform", size=(1800, 1200))
 
     # disable default VTK keybindings
     try:
@@ -324,7 +345,11 @@ def stage_transform(cfgs):
     print("    Q / Esc : Finish and Save")
     print("=" * 60)
 
+    import time
+    import functions
+    gui_start = time.time()
     plt.show(interactive=True)
+    functions.total_gui_time += time.time() - gui_start
 
     # accumulate transforms: project each to pure rotation before composing
     fine_transform = getattr(assembly, "transform", None)

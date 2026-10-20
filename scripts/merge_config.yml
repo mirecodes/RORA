@@ -1,0 +1,94 @@
+# Merge Manifold Configuration
+
+# Configurations for different objects
+
+# Category 1: Simple Objects
+
+microwave:
+  urdf_path: "../urdf/microwave/mobility.urdf"
+  output_dir: "../merged"
+  joint_config:
+    joint_0: 45
+
+bucket:
+  urdf_path: "../urdf/bucket/mobility.urdf"
+  output_dir: "../merged"
+  joint_config:
+    joint_0: 90
+
+trashcan:
+  urdf_path: "../urdf/trashcan/mobility.urdf"
+  output_dir: "../merged"
+  joint_config:
+
+fan:
+  urdf_path: "../urdf/fan/mobility.urdf"
+  output_dir: "../merged"
+
+globe:
+  urdf_path: "../urdf/globe/mobility.urdf"
+  output_dir: "../merged"
+
+usb:
+  urdf_path: "../urdf/usb/mobility.urdf"
+  output_dir: "../merged"
+  joint_config:
+    joint_0: -0.132
+
+# Category 2: Complex Objects
+
+toilet:
+  urdf_path: "../urdf/toilet/mobility.urdf"
+  output_dir: "../merged"
+  joint_config:
+    joint_0: 0
+    joint_1: 60
+    joint_2: 30
+    joint_3: 0
+
+faucet:
+  urdf_path: "../urdf/faucet/mobility.urdf"
+  output_dir: "../merged"
+  joint_config:
+    joint_3: 180
+
+folding_chair:
+  urdf_path: "../urdf/folding_chair/mobility.urdf"
+  output_dir: "../merged"
+
+box:
+  urdf_path: "../urdf/box/mobility.urdf"
+  output_dir: "../merged"
+
+refrigerator:
+  urdf_path: "../urdf/refrigerator/mobility.urdf"
+  output_dir: "../merged"
+  joint_config:
+    joint_1: 45
+    joint_2: 45
+
+toaster:
+  urdf_path: "../urdf/toaster/mobility.urdf"
+  output_dir: "../merged"
+
+
+# Category 3: Chained Objects
+
+lamp:
+  urdf_path: "../urdf/lamp/mobility.urdf"
+  output_dir: "../merged"
+
+dispenser:
+  urdf_path: "../urdf/dispenser/mobility.urdf"
+  output_dir: "../merged"
+
+safe:
+  urdf_path: "../urdf/safe/mobility.urdf"
+  output_dir: "../merged"
+
+stapler:
+  urdf_path: "../urdf/stapler/mobility.urdf"
+  output_dir: "../merged"
+  joint_config:
+    joint_0: 45
+    joint_1: 90

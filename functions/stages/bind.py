@@ -6,6 +6,7 @@ import pymeshlab
 import trimesh
 from json_handler import JsonHandler
 from scipy.spatial import cKDTree
+from scipy.spatial.transform import Rotation as R
 from plyfile import PlyData, PlyElement
 
 
@@ -14,8 +15,9 @@ from plyfile import PlyData, PlyElement
 @dataclass
 class BindCfgs:
     k_neighbors: int = 3            # fixed: use k=3
-    max_dist_rel: float = 0.10      # exclude if nearest vertex farther than this * mesh diagonal
-    z_cut_rel: float = -0.01        # exclude if Gaussian z < (z_cut_rel * mesh diagonal)
+    # max_dist_rel: float = 0.20      # exclude if nearest vertex farther than this * mesh diagonal
+    max_dist_rel: float = 1.00      # exclude if nearest vertex farther than this * mesh diagonal
+    z_cut_rel: float = -1000.0        # exclude if Gaussian z < (z_cut_rel * mesh diagonal)
     verbose: bool = True
 
 
@@ -43,21 +45,78 @@ def _get_positions(rec):
     raise KeyError("Cannot find position fields (x,y,z or known aliases).")
 
 
-def _slice_vertex_in_ply(ply: PlyData, idxs):
-    """Return a new PlyData that keeps only selected vertex rows; preserve all metadata/elements."""
+def _slice_vertex_in_ply(ply: PlyData, idxs, transform_matrix=None):
+    """
+    Return a new PlyData that keeps only selected vertex rows; preserve all metadata/elements.
+    If transform_matrix is provided, apply it to positions and rotations.
+    """
     new_elements = []
     for el in ply.elements:
         if el.name == 'vertex':
-            names = el.data.dtype.names
-            sliced = np.empty(len(idxs), dtype=el.data.dtype)
-            for n in names:
-                sliced[n] = el.data[n][idxs]
-            new_el = PlyElement.describe(sliced, 'vertex')
+            # Use numpy structured array slicing directly
+            sliced_data = el.data[idxs].copy() # Copy to allow modification
+            
+            if transform_matrix is not None:
+                # 1. Transform Positions
+                # Assuming fields are x, y, z
+                pos = np.stack([sliced_data['x'], sliced_data['y'], sliced_data['z']], axis=1)
+                # Apply transform: P_new = T * P_old
+                # Homogeneous coordinates
+                pos_h = np.hstack([pos, np.ones((len(pos), 1))])
+                pos_new = (transform_matrix @ pos_h.T).T
+                
+                sliced_data['x'] = pos_new[:, 0]
+                sliced_data['y'] = pos_new[:, 1]
+                sliced_data['z'] = pos_new[:, 2]
+                
+                # 2. Transform Rotations (Quaternions)
+                # Gaussian Splatting usually stores rotation as quaternion (w, x, y, z) or (x, y, z, w)
+                # Standard 3DGS uses (w, x, y, z) order usually, but let's check field names.
+                # Common names: rot_0, rot_1, rot_2, rot_3
+                
+                has_rot = all(f'rot_{i}' for i in range(4)) in sliced_data.dtype.names
+                if not has_rot:
+                     # Try other names if needed, but standard is rot_0..3
+                     pass
+                
+                if has_rot:
+                    # Extract quaternions (N, 4) -> (w, x, y, z) assumption
+                    # Note: 3DGS implementation details vary. 
+                    # If it's (w, x, y, z), rot_0 is w.
+                    qs = np.stack([sliced_data['rot_0'], sliced_data['rot_1'], sliced_data['rot_2'], sliced_data['rot_3']], axis=1)
+                    
+                    # Rotation matrix from transform
+                    R_mat = transform_matrix[:3, :3]
+                    # Convert R_mat to quaternion
+                    q_transform = R.from_matrix(R_mat).as_quat() # returns (x, y, z, w) usually in scipy
+                    # Scipy uses (x, y, z, w). 3DGS often uses (w, x, y, z).
+                    # Let's assume input qs is (w, x, y, z).
+                    
+                    # Convert qs (w, x, y, z) to scipy (x, y, z, w)
+                    qs_scipy = np.roll(qs, -1, axis=1) 
+                    
+                    # Apply rotation: q_new = q_transform * q_old
+                    # Using scipy Rotation objects
+                    rot_old = R.from_quat(qs_scipy)
+                    rot_trans = R.from_matrix(R_mat)
+                    rot_new = rot_trans * rot_old
+                    
+                    qs_new_scipy = rot_new.as_quat() # (x, y, z, w)
+                    
+                    # Convert back to (w, x, y, z)
+                    qs_new = np.roll(qs_new_scipy, 1, axis=1)
+                    
+                    sliced_data['rot_0'] = qs_new[:, 0]
+                    sliced_data['rot_1'] = qs_new[:, 1]
+                    sliced_data['rot_2'] = qs_new[:, 2]
+                    sliced_data['rot_3'] = qs_new[:, 3]
+
+            new_el = PlyElement.describe(sliced_data, 'vertex')
             new_elements.append(new_el)
         else:
             new_elements.append(el)
-    new_ply = PlyData(new_elements, text=ply.text)
-    new_ply.byte_order = ply.byte_order
+            
+    new_ply = PlyData(new_elements, text=ply.text, byte_order=ply.byte_order)
     new_ply.comments = list(ply.comments)
     new_ply.obj_info = list(ply.obj_info)
     return new_ply
@@ -131,15 +190,38 @@ def stage_bind(cfgs):
       - Drop Gaussians whose nearest vertex is too far
       - Save per-part PLYs, preserving all original fields/elements
     """
+    print(f"[Info] Creating output directory: {cfgs.gaussian_out_dir}")
     os.makedirs(cfgs.gaussian_out_dir, exist_ok=True)
 
     states = JsonHandler(cfgs.json_states_dir, auto_save=True)
-    mesh = trimesh.load(states.refine.dirs.mesh)
+    
+    mesh_path = states.refine.dirs.mesh
+    print(f"[Info] Loading mesh from: {mesh_path}")
+    
+    # [Fix] process=False is crucial!
+    # Trimesh defaults to process=True, which merges vertices and changes indices.
+    # This causes mismatch with vert_labels which are based on the original file indices.
+    mesh = trimesh.load(mesh_path, process=False)
+    
     vert_labels = states.segment.vert_label
+    print(f"[Info] Loaded vertex labels: {len(vert_labels)} labels")
 
-    g_ply = PlyData.read(states.transform.dirs.gaussian)
+    # [Check] Validate counts
+    if len(mesh.vertices) != len(vert_labels):
+        print(f"[Error] Vertex count mismatch! Mesh: {len(mesh.vertices)}, Labels: {len(vert_labels)}")
+        print("[Error] This will cause incorrect binding. Please check if the mesh file matches the labels.")
+        # We proceed, but the result will likely be wrong.
+
+    gaussian_path = states.transform.dirs.gaussian
+    print(f"[Info] Reading Gaussian from: {gaussian_path}")
+    if not os.path.exists(gaussian_path):
+        print(f"[Error] Gaussian file not found at: {gaussian_path}")
+        return
+
+    g_ply = PlyData.read(gaussian_path)
     g_rec = g_ply['vertex'].data
     gauss_xyz = _get_positions(g_rec)
+    print(f"[Info] Loaded {len(gauss_xyz)} Gaussian points")
 
     bind_cfgs = BindCfgs()  # k=3, thresholds from config
 
@@ -153,7 +235,12 @@ def stage_bind(cfgs):
     # Work only on survivors of z-cut
     xyz_kept = gauss_xyz[keep_z]
 
+    if len(xyz_kept) == 0:
+        print("[Warning] No Gaussian points kept after Z-cut.")
+        return
+
     # --- KNN assignment on z-kept points ---
+    print(f"[Info] Running KNN assignment for {len(xyz_kept)} points...")
     assigned_kept = _assign_categories_knn3(
         mesh, vert_labels, xyz_kept,
         k=bind_cfgs.k_neighbors,
@@ -171,11 +258,34 @@ def stage_bind(cfgs):
     # Save per-category except -1
     keep = (assigned != -1)
     cats = np.unique(assigned[keep])
+    
+    print(f"[Info] Found {len(cats)} categories to save: {cats}")
+
+    if len(cats) == 0:
+        print("[Warning] No valid categories found to save (all points excluded or no labels assigned).")
+        
+    # [New] Prepare Transform Matrix if needed
+    transform_matrix = None
+    if cfgs.urdf_use_original_coordinates:
+        try:
+            if hasattr(states, "transform") and hasattr(states.transform, "matrix"):
+                T_aligned = np.array(states.transform.matrix)
+                transform_matrix = np.linalg.inv(T_aligned)
+                print("[Info] Applying INVERSE transform to Gaussians (Reverting to Original Coordinates).")
+            else:
+                print("[Warning] Transform matrix not found. Skipping coordinate reversion.")
+        except Exception as e:
+            print(f"[Error] Failed to prepare transform matrix: {e}")
 
     for c in cats:
         idxs = np.nonzero(keep & (assigned == c))[0]
         if idxs.size == 0:
             continue
         out_path = os.path.join(cfgs.gaussian_out_dir, f"gaussian_{int(c)}.ply")
-        print(f"Writing {out_path} ({idxs.size} points)")
-        _slice_vertex_in_ply(g_ply, idxs).write(out_path)
+        print(f"[Info] Saving category {c} to {out_path} with {idxs.size} points")
+        try:
+            # Pass transform_matrix to slice function
+            _slice_vertex_in_ply(g_ply, idxs, transform_matrix=transform_matrix).write(out_path)
+            print(f"[Success] Saved {out_path}")
+        except Exception as e:
+            print(f"[Error] Failed to write {out_path}: {e}")
