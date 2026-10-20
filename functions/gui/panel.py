@@ -65,7 +65,8 @@ class StageRow(QWidget):
         self.check = QCheckBox()
         self.check.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.check.setToolTip("Include this stage in ▶ Run")
-        self.check.toggled.connect(lambda on: self.toggled.emit(self.stage, on))
+        # Slots are bound methods: a lambda capturing `self` forms a cycle that can crash when GC'd.
+        self.check.toggled.connect(self._emit_toggled)
         self.dot = _label(name="Dot")
         self.name = _label(STAGE_LABELS[stage], "StageName")
         self.summary = _label("", "Meta")
@@ -74,8 +75,8 @@ class StageRow(QWidget):
         for b in (self.rerun_btn, self.from_btn):
             b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             b.setFixedWidth(20)
-        self.rerun_btn.clicked.connect(lambda: self.rerun.emit(self.stage))
-        self.from_btn.clicked.connect(lambda: self.run_from.emit(self.stage))
+        self.rerun_btn.clicked.connect(self._emit_rerun)
+        self.from_btn.clicked.connect(self._emit_run_from)
 
         header = QHBoxLayout()
         header.setContentsMargins(0, 2, 0, 2)
@@ -97,6 +98,15 @@ class StageRow(QWidget):
         self.set_expanded(False)
         self._show_actions(False)
         self.set_status("pending")
+
+    def _emit_toggled(self, on: bool) -> None:
+        self.toggled.emit(self.stage, on)
+
+    def _emit_rerun(self) -> None:
+        self.rerun.emit(self.stage)
+
+    def _emit_run_from(self) -> None:
+        self.run_from.emit(self.stage)
 
     def set_status(self, status: str) -> None:
         self.status = status
@@ -278,7 +288,7 @@ class LogView(QWidget):
         head = QHBoxLayout()
         self.toggle = QToolButton(text="LOG ▸")
         self.toggle.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.toggle.clicked.connect(lambda: self.set_expanded(not self.text.isVisible()))
+        self.toggle.clicked.connect(self._toggle)
         self.last = _label("", "Meta")
         self.last.setMinimumWidth(10)
         head.addWidget(self.toggle)
@@ -300,6 +310,9 @@ class LogView(QWidget):
         lines = [ln for ln in self._tail.splitlines() if ln.strip()]
         if lines:
             self.last.setText(lines[-1][:200])
+
+    def _toggle(self) -> None:
+        self.set_expanded(not self.text.isVisible())
 
     def set_expanded(self, on: bool) -> None:
         self.text.setVisible(on)
