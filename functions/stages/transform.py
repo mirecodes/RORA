@@ -8,7 +8,8 @@ from plyfile import PlyData, PlyElement
 from json_handler import JsonHandler
 from functools import partial
 
-from functions import calculate_transforms
+from functions.utils.mesh import align_transform
+from functions.visualize.style import timed_show
 
 
 # ----------------------- small linear algebra helpers ------------------------
@@ -262,7 +263,7 @@ def stage_transform(cfgs):
     mesh = ms.mesh(0)
     
     if tf_cfgs["use_auto_alignment"]:
-        initial_transform = calculate_transforms(ms)  # 4x4
+        initial_transform = align_transform(ms)  # 4x4
         if initial_transform is None:
             print("[Warning] Auto-alignment failed. Using Identity.")
             initial_transform = np.eye(4)
@@ -334,11 +335,7 @@ def stage_transform(cfgs):
     print("    Q / Esc : Finish and Save")
     print("=" * 60)
 
-    import time
-    import functions
-    gui_start = time.time()
-    plt.show(interactive=True)
-    functions.total_gui_time += time.time() - gui_start
+    timed_show(plt, interactive=True)
 
     # accumulate transforms: project each to pure rotation before composing
     fine_transform = getattr(assembly, "transform", None)

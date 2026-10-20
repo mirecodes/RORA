@@ -2,42 +2,33 @@ import os
 import numpy as np
 import pymeshlab
 import trimesh
-import vedo
 from typing import Dict, List, Tuple
 from collections import defaultdict
-from functools import partial
 
 from json_handler import JsonHandler
-from functions.lib.geometry import normalize, closest_points_between_lines
-from functions.lib.graph import build_adjacency_graph, classify_vertices, cluster_reciprocal_loop_pairs
-from functions.lib.estimation import learn_separator_main
-from functions.lib.mesh import append_patches_to_mesh_files, triangulate_patch_on_loop, save_link_meshes_from_labels
-from functions.lib.urdf import build_joints_from_rlps
-from functions.lib.visualization import recolor_parts, select_parts_interactive, visualize_and_select_vectors_for_rlps, visualize_rlp_clustering, visualize_segmented_parts
+from functions.math.geometry import normalize
+from functions.math.graph import adjacency, label_vertices
+from functions.math.patch import loop_patch
+from functions.math.rlp import cluster_rlps, loop_normal, merge_lines, plane_intersections
+from functions.math.separator import learn_separators
+from functions.utils.mesh import append_patches, save_link_meshes
+from functions.utils.urdf import joints_from_rlps
+from functions.visualize.plots import show_labels, show_rlps
+from functions.visualize.select import select_joint_vectors, select_parts
 
 
 # =============================================================================
 # Pipeline helpers (separation, vectors, patches)
 # =============================================================================
-def compute_separation_results(ms: pymeshlab.MeshSet,
-                               categories: List[List[trimesh.Trimesh]],
-                               categories_num: int,
-                               adj,
-                               vert_label,
-                               visualize_results: bool = False,
-                               **separator_kwargs) -> List[dict]:
-    """Run learn_separator_main per category and flatten outputs."""
-    results: Dict[int, dict | List[dict]] = {}
+def compute_separation_results(verts, faces, categories_num: int, adj, vert_label,
+                               visualize_results: bool = False, **separator_kwargs) -> List[dict]:
+    """Run learn_separators per category and flatten outputs."""
     print(f"[info] Starting separation computation for {categories_num} categories...")
+    results_list = []
     for idx_part in range(1, categories_num + 1):
         print(f"[info] Processing category {idx_part}/{categories_num}...")
-        out = learn_separator_main(
-            ms, categories, idx_part, adj, vert_label,
-            visualize_results=visualize_results,
-            **separator_kwargs
-        )
-        results[idx_part] = out
-    results_list = [item for v in results.values() for item in (v if isinstance(v, list) else [v])]
+        results_list += learn_separators(verts, faces, idx_part, adj, vert_label,
+                                         visualize_results=visualize_results, **separator_kwargs)
     print(f"[info] Separation computation finished. Total results: {len(results_list)}")
     return results_list
 
@@ -47,7 +38,7 @@ def prepare_vectors_for_rlps(rlps: List[dict]) -> None:
     print(f"[info] Preparing vectors for {len(rlps)} RLPs...")
     for rlp in rlps:
         center = rlp['center']
-        # Use the RLP normal computed in cluster_reciprocal_loop_pairs directly
+        # Use the RLP normal computed in cluster_rlps directly
         n_plane = np.asarray(rlp["normal"], dtype=float)
         
         A = rlp['a']['linear']; B = rlp['b']['linear']
@@ -63,68 +54,9 @@ def prepare_vectors_for_rlps(rlps: List[dict]) -> None:
             'type': 'normal'
         }]
 
-        # 2. Extract polyhedral cross products from BOTH directions
-        poly_A = rlp['a'].get('polyhedral', {})
-        poly_B = rlp['b'].get('polyhedral', {})
-        
-        lines_A = []
-        if poly_A.get('plane') and len(poly_A['plane']) > 0:
-            planes = poly_A['plane']; m = len(planes)
-            for u in range(m):
-                for v in range(u + 1, m):
-                    n_cross = np.cross(planes[u][0], planes[v][0])
-                    if np.linalg.norm(n_cross) > 1e-6:
-                        lines_A.append(normalize(n_cross))
-                        
-        lines_B = []
-        if poly_B.get('plane') and len(poly_B['plane']) > 0:
-            planes = poly_B['plane']; m = len(planes)
-            for u in range(m):
-                for v in range(u + 1, m):
-                    n_cross = np.cross(planes[u][0], planes[v][0])
-                    if np.linalg.norm(n_cross) > 1e-6:
-                        lines_B.append(normalize(n_cross))
-
-        # 3. Match and merge lines_A and lines_B
-        merged_lines = []
-        matched_A = set()
-        matched_B = set()
-        
-        # Build all candidate pairs with absolute dot product (handles 180-degree flipped vectors)
-        candidates = []
-        for idx_a, la in enumerate(lines_A):
-            for idx_b, lb in enumerate(lines_B):
-                dot_val = abs(np.dot(la, lb))
-                candidates.append((dot_val, idx_a, idx_b))
-                
-        # Sort by similarity descending
-        candidates.sort(key=lambda x: x[0], reverse=True)
-        
-        # Match threshold: 30 degrees -> cos(30) = 0.866025
-        cos_30 = 0.866025
-        for dot_val, idx_a, idx_b in candidates:
-            if dot_val < cos_30:
-                break
-            if idx_a in matched_A or idx_b in matched_B:
-                continue
-                
-            la = lines_A[idx_a]
-            lb = lines_B[idx_b]
-            # Flip direction if they are opposite (180 degrees)
-            if np.dot(la, lb) < 0.0:
-                lb = -lb
-            l_merged = normalize(la + lb)
-            merged_lines.append(l_merged)
-            matched_A.add(idx_a)
-            matched_B.add(idx_b)
-                
-        # Include unmatched lines from both sides
-        for idx_a, la in enumerate(lines_A):
-            if idx_a not in matched_A:
-                merged_lines.append(la)
-        for idx_b, lb in enumerate(lines_B):
-            if idx_b not in matched_B:
-                merged_lines.append(lb)
+        # 2-3. Polyhedral intersection lines from BOTH directions, matched and merged
+        merged_lines = merge_lines(plane_intersections(rlp['a'].get('polyhedral', {}).get('plane') or []),
+                                   plane_intersections(rlp['b'].get('polyhedral', {}).get('plane') or []))
 
         # 4. Add the first merged intersection line & the 3rd recommended vector
         if len(merged_lines) > 0:
@@ -162,7 +94,7 @@ def build_extrapoints_and_patches(results_list: List[dict],
         if pid <= 0 or loop_idx is None or len(loop_idx) < 3:
             continue
         loop_xyz = verts[np.asarray(loop_idx, dtype=int)]
-        P3, F = triangulate_patch_on_loop(loop_xyz, step_rel=0.03, sigma_scale=2.0, k_min=6)
+        P3, F = loop_patch(loop_xyz, step_rel=0.03, sigma_scale=2.0, k_min=6)
         if P3.size and F.size:
             patch_vertices[pid].append(P3.astype(float))
             patch_faces[pid].append(F.astype(np.int64))
@@ -208,12 +140,7 @@ def append_single_loop_rlps(results_list: List[dict], rlps: List[dict], verts: n
                 else:
                     center = np.zeros(3)
                 
-                lin = single.get("linear", {})
-                if lin and lin.get("plane") and len(lin["plane"]) > 0:
-                    n_val = normalize(np.asarray(lin["plane"][0][0], dtype=float))
-                else:
-                    n_val = normalize(np.asarray(single["pca_normal"], dtype=float))
-                
+                n_val = loop_normal(single)
                 rlp = {
                     'parts': key,
                     'a': single,
@@ -382,7 +309,7 @@ def stage_segment(cfgs):
         print("=" * 60)
 
     print("[info] Starting interactive part selection...")
-    categories, belongings, rand_colors = select_parts_interactive(parts, verts, faces, categories_num, display=True)
+    categories = select_parts(parts, verts, faces, categories_num)
     print("[info] Part selection finished.")
     
     # --- Compact categories by removing empty ones (keeping index 0) ---
@@ -399,37 +326,32 @@ def stage_segment(cfgs):
             print(f"[info] Updated categories_num: {categories_num}")
     # -------------------------------------------------------------------
 
-    # Manually fill categories if UI skipped (not handled here fully, assumed user wants UI if debug_mode is True)
-    # If debug_mode is false, select_parts_interactive returns empty categories. 
-    # This might break things if not handled. 
-    # Assuming standard flow requires selection. 
     if not any(categories) and categories_num > 0:
-         print("[warn] No parts selected or UI skipped. Defaulting to all parts unassigned or similar?")
-         # Fallback logic if needed, or just proceed (likely failing later).
+        print("[warn] No parts selected.")
 
     # adjacency, vertex labels
     print("[info] Building adjacency graph and classifying vertices...")
-    adj = build_adjacency_graph(faces, len(verts))
-    vert_label = classify_vertices(verts, categories, use_signed_dist=True).astype(int)
+    adj = adjacency(faces, len(verts))
+    vert_label = label_vertices(verts, categories, **segCfgs["labeling"]).astype(int)
     print("[info] Graph build and classification finished.")
 
     if cfgs.debug_mode:
-        visualize_segmented_parts(verts, faces, vert_label, display=cfgs.debug_mode)
+        show_labels(verts, faces, vert_label)
 
     # separation + clustering + vectors
     print("[info] Computing separation results...")
     results_list = compute_separation_results(
-        ms, categories, categories_num, adj, vert_label,
+        verts, faces, categories_num, adj, vert_label,
         visualize_results=cfgs.debug_mode,
         **segCfgs["separator"]
     )
 
     print("[info] Clustering reciprocal loop pairs (RLPs)...")
-    rlps = cluster_reciprocal_loop_pairs(results_list, **segCfgs["rlp_clustering"])
+    rlps = cluster_rlps(results_list, **segCfgs["rlp_clustering"])
 
     # Visualizing the RLP clustering details
     if cfgs.debug_mode:
-        visualize_rlp_clustering(verts, faces, parts, categories, results_list, rlps)
+        show_rlps(verts, faces, rlps)
 
     if segCfgs["allow_single_loop_rlp"]:
         append_single_loop_rlps(results_list, rlps, verts)
@@ -456,14 +378,14 @@ def stage_segment(cfgs):
         print("=" * 60)
 
     print("[info] Starting interactive vector selection...")
-    visualize_and_select_vectors_for_rlps(rlps, parts, categories, verts, faces, vert_label=vert_label, display=True)
+    select_joint_vectors(rlps, verts, faces, vert_label)
     print("[info] Vector selection finished.")
 
     # save per-link meshes
     print("[info] Saving link meshes...")
     seg_dir = os.path.join(os.path.dirname(cfgs.json_states_dir), "segment_mesh")
-    segment_mesh_paths = save_link_meshes_from_labels(verts, faces, vert_label, categories_num, seg_dir)
-    joints = build_joints_from_rlps(rlps)
+    segment_mesh_paths = save_link_meshes(verts, faces, vert_label, categories_num, seg_dir)
+    joints = joints_from_rlps(rlps)
     print("[info] Link meshes saved.")
 
     # persist states
@@ -478,7 +400,7 @@ def stage_segment(cfgs):
     # patch fill & append
     print("[info] Building and appending patches...")
     patch_vertices, patch_faces = build_extrapoints_and_patches(results_list, verts)
-    append_patches_to_mesh_files(segment_mesh_paths, patch_vertices, patch_faces)
+    append_patches(segment_mesh_paths, patch_vertices, patch_faces)
     print("[info] Patches appended.")
     
     print("[info] stage_segment finished successfully.")

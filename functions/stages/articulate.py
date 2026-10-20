@@ -4,7 +4,7 @@ from typing import Dict, List
 import numpy as np
 
 from json_handler import JsonHandler
-from functions.lib.urdf import generate_urdf
+from functions.utils.urdf import generate_urdf
 
 # ================================
 # Stage: articulate (minimal)

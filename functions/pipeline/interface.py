@@ -14,7 +14,7 @@ from json_handler import JsonHandler
 
 from functions import stage_transform, stage_refine, stage_decompose, stage_segment, stage_articulate, stage_bind, \
     restore_transform
-from functions.lib.config import load_cfg, load_params
+from functions.utils.config import load_cfg, load_params
 
 
 @dataclass

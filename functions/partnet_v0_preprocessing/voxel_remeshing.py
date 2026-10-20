@@ -9,7 +9,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 if ROOT not in sys.path:
     sys.path.append(ROOT)
 
-from functions.lib.config import load_cfg
+from functions.utils.config import load_cfg
 
 INPUT_DIR = os.path.join(ROOT, "data", "preprocess", "partnet_v0")   # <name>/mobility.urdf
 OUTPUT_DIR = os.path.join(ROOT, "data", "objects")                   # <name>/mesh.ply (pipeline input)
