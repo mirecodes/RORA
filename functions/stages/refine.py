@@ -1,4 +1,3 @@
-from dataclasses import dataclass, field
 import os
 import pymeshlab
 import trimesh
@@ -8,85 +7,11 @@ from json_handler import JsonHandler
 
 from functions import repair_mesh, flatten_bottom_hole, fill_bottom_hole
 
-@dataclass
-class RefinementConfig:
-    """
-    Centralizes all ms.* call parameters.
-    """
-    # do_flatten_bottom: bool = False
-    do_flatten_bottom: bool = True
 
-    # Toggle steps on/off
-    steps: dict = field(default_factory=lambda: {
-        "cleaning": True, # step-1
-        "reconstruction": True, # step-2
-        # "vertex_selection": False, # step-3
-        "vertex_selection": True,
-        "decimation": True, # step-4
-        "remeshing": True, # step-5
-        # "occlusion_repair": False, # step-6
-        "occlusion_repair": True,
-        "close_holes": True, # step-7
-        "attribute_transfer": True, # step-8
-    })
-
-    params: dict = field(default_factory=lambda: {
-        # 1) cleaning / components
-        "meshing_remove_connected_component_by_diameter": {
-            "mincomponentdiag": PercentageValue(20.0),
-        },
-        # 2) reconstruction
-        "generate_surface_reconstruction_screened_poisson": {
-            "depth": 8, # default = 10
-            "fulldepth": 8, # default = 8
-            # 'cgdepth': 0,
-            # 'scale': 1.1,
-            # 'samplespernode': 1.5,
-            # 'pointweight': 4,
-            # 'iters': 8,
-            # 'confidence': False,
-            'preclean': True,
-            # 'threads': 16,
-        },
-        # 3) vertex selection (cut)
-        "compute_selection_by_condition_per_vertex": {
-            "condselect": "(z < -1e-6)",
-        },
-        # 4) decimation
-        "meshing_decimation_quadric_edge_collapse": {
-            "targetfacenum": 15000,
-            "preservenormal": False,
-        },
-        # 5) remeshing
-        "meshing_isotropic_explicit_remeshing": {
-            "targetlen": PercentageValue(1.0),
-            # 'iterations': 10,
-            'adaptive': True,
-            # 'selectedonly': False,
-            # 'featuredeg': 30.0,
-            # 'checksurfdist': True,
-            # 'maxsurfdist': PercentageValue(1.0),
-            # 'splitflag': True,
-            # 'collapseflag': True,
-            # 'swapflag': True,
-            # 'smoothflag': True,
-            # 'reprojectflag': True,
-        },
-        # 6) close holes
-        "meshing_close_holes": {
-            "maxholesize": 10000,
-        },
-        # 7) attribute transfer
-        "transfer_attributes_per_vertex": {
-            "sourcemesh": 1,
-            "targetmesh": 0,
-            "vertexsampling": False,
-            "geomtransfer": False,
-            "normaltransfer": True,
-            "colortransfer": True,
-            "upperbound": PercentageValue(5.0),
-        },
-    })
+def _pct(params: dict) -> dict:
+    """Convert "N%" strings from parameters_cfg.yml into pymeshlab.PercentageValue(N)."""
+    return {k: PercentageValue(float(v[:-1])) if isinstance(v, str) and v.endswith("%") else v
+            for k, v in params.items()}
 
 
 def debug_show_mesh(ms: pymeshlab.MeshSet, title: str):
@@ -131,7 +56,7 @@ def debug_show_mesh(ms: pymeshlab.MeshSet, title: str):
 
 
 def stage_refine(cfgs, debug_mode: bool = False):
-    refinement_method = getattr(cfgs, "refinement_method", "pymeshlab")
+    refinement_method = cfgs.params["refine"]["method"]
     print(f"[info]: Refinement stage using method: '{refinement_method}'")
 
     if refinement_method == "point2mesh":
@@ -148,6 +73,7 @@ def stage_refine(cfgs, debug_mode: bool = False):
 
 
 def run_point2mesh_refinement(cfgs, input_mesh_path: str = None, debug_mode: bool = False):
+    p2m_cfgs = cfgs.params["refine"]["point2mesh"]
     states = JsonHandler(cfgs.json_states_dir, auto_save=False)
     raw_mesh_in = input_mesh_path if input_mesh_path else states.transform.dirs.mesh
     mesh_in_dir = os.path.abspath(raw_mesh_in)
@@ -172,8 +98,8 @@ def run_point2mesh_refinement(cfgs, input_mesh_path: str = None, debug_mode: boo
         "--input-pc", mesh_in_dir,
         "--initial-mesh", mesh_in_dir,
         "--save-path", save_dir,
-        "--iterations", str(getattr(cfgs, "point2mesh_iterations", 10)),
-        "--gpu", "-1"
+        "--iterations", str(p2m_cfgs["iterations"]),
+        "--gpu", str(p2m_cfgs["gpu"])
     ]
 
     print(f"[point2mesh]: Running command: {' '.join(cmd)}")
@@ -207,7 +133,7 @@ def run_point2mesh_refinement(cfgs, input_mesh_path: str = None, debug_mode: boo
 
 def run_pymeshlab_refinement(cfgs, debug_mode: bool = False):
     # Load configurations
-    refCfgs = RefinementConfig()
+    refCfgs = cfgs.params["refine"]["pymeshlab"]
     states = JsonHandler(cfgs.json_states_dir, auto_save=False)
 
     # Load meshes
@@ -221,39 +147,39 @@ def run_pymeshlab_refinement(cfgs, debug_mode: bool = False):
     # --------------------------------------------------------------------------
 
     # 1) Cleaning: remove small connected components
-    if refCfgs.steps.get("cleaning", True):
+    if refCfgs["steps"].get("cleaning", True):
         ms.meshing_remove_connected_component_by_diameter(
-            **refCfgs.params["meshing_remove_connected_component_by_diameter"]
+            **_pct(refCfgs["params"]["meshing_remove_connected_component_by_diameter"])
         )
         if debug_mode: debug_show_mesh(ms, "1. After Component Cleaning")
 
     # 2) Reconstruction: Screened Poisson
-    if refCfgs.steps.get("reconstruction", True):
+    if refCfgs["steps"].get("reconstruction", True):
         ms.generate_surface_reconstruction_screened_poisson(
-            **refCfgs.params["generate_surface_reconstruction_screened_poisson"]
+            **_pct(refCfgs["params"]["generate_surface_reconstruction_screened_poisson"])
         )
         if debug_mode: debug_show_mesh(ms, "2. After Poisson Reconstruction")
 
     # 3) Vertex selection (cut-off)
-    if refCfgs.steps.get("vertex_selection", True):
+    if refCfgs["steps"].get("vertex_selection", True):
         ms.compute_selection_by_condition_per_vertex(
-            **refCfgs.params["compute_selection_by_condition_per_vertex"]
+            **_pct(refCfgs["params"]["compute_selection_by_condition_per_vertex"])
         )
         if ms.current_mesh().selected_vertex_number() > 0:
             ms.meshing_remove_selected_vertices()
         if debug_mode: debug_show_mesh(ms, "3. After Artifact Removal (z<0)")
 
     # 4) Decimation (edge collapse)
-    if refCfgs.steps.get("decimation", True):
+    if refCfgs["steps"].get("decimation", True):
         ms.meshing_decimation_quadric_edge_collapse(
-            **refCfgs.params["meshing_decimation_quadric_edge_collapse"]
+            **_pct(refCfgs["params"]["meshing_decimation_quadric_edge_collapse"])
         )
         if debug_mode: debug_show_mesh(ms, "4. After Simplification")
 
     # 5) Remeshing (isotropic explicit)
-    if refCfgs.steps.get("remeshing", True):
+    if refCfgs["steps"].get("remeshing", True):
         ms.meshing_isotropic_explicit_remeshing(
-            **refCfgs.params["meshing_isotropic_explicit_remeshing"]
+            **_pct(refCfgs["params"]["meshing_isotropic_explicit_remeshing"])
         )
         if debug_mode: debug_show_mesh(ms, "5. After Isotropic Remeshing")
 
@@ -261,8 +187,8 @@ def run_pymeshlab_refinement(cfgs, debug_mode: bool = False):
         repair_mesh(ms)
 
     # Infill bottom occlusion
-    if refCfgs.steps.get("occlusion_repair", True):
-        if refCfgs.do_flatten_bottom:
+    if refCfgs["steps"].get("occlusion_repair", True):
+        if refCfgs["do_flatten_bottom"]:
             ms = flatten_bottom_hole(ms, target_z=0.0)
             ms = fill_bottom_hole(ms)
         if debug_mode: debug_show_mesh(ms, "6. After Occlusion Repair")
@@ -271,9 +197,9 @@ def run_pymeshlab_refinement(cfgs, debug_mode: bool = False):
         repair_mesh(ms)
 
     # 6) Close holes
-    if refCfgs.steps.get("close_holes", True):
+    if refCfgs["steps"].get("close_holes", True):
         ms.meshing_close_holes(
-            **refCfgs.params["meshing_close_holes"]
+            **_pct(refCfgs["params"]["meshing_close_holes"])
         )
         if debug_mode: debug_show_mesh(ms, "7. After Hole Closing")
 
@@ -281,12 +207,12 @@ def run_pymeshlab_refinement(cfgs, debug_mode: bool = False):
     repair_mesh(ms)
 
     # 7) Restore vertex colors (attribute transfer)
-    if refCfgs.steps.get("attribute_transfer", True):
+    if refCfgs["steps"].get("attribute_transfer", True):
         ms.load_new_mesh(mesh_in_dir) # This is the source mesh (index 1)
         ms.set_current_mesh(0) # Target mesh is the refined one
 
         ms.transfer_attributes_per_vertex(
-            **refCfgs.params["transfer_attributes_per_vertex"]
+            **_pct(refCfgs["params"]["transfer_attributes_per_vertex"])
         )
         if debug_mode: debug_show_mesh(ms, "8. After Attribute Restoration")
 

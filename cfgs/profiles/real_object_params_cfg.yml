@@ -1,0 +1,11 @@
+# Real scanned objects (apr_*, proto_*): noisy GS-reconstructed mesh sitting on a table.
+# Only keys listed here override parameters_cfg.yml.
+
+refine:
+  pymeshlab:
+    do_flatten_bottom: true     # table contact leaves the bottom open
+    steps:
+      reconstruction: true      # Poisson to rebuild a watertight surface
+      vertex_selection: true    # cut floor/table remnants below z=0
+      occlusion_repair: true
+      close_holes: true

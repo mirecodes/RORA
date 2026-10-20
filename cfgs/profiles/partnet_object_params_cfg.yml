@@ -1,0 +1,12 @@
+# PartNet-Mobility objects (data/preprocess/partnet_v0 -> data/objects voxel meshes): clean synthetic geometry.
+# Only keys listed here override parameters_cfg.yml.
+# Refine = cleaning -> decimation -> remeshing -> attribute transfer (former refine_dataset.py).
+
+refine:
+  pymeshlab:
+    do_flatten_bottom: false
+    steps:
+      reconstruction: false     # mesh is already closed; Poisson would only blur it
+      vertex_selection: false   # no floor to cut
+      occlusion_repair: false   # bottom is not occluded
+      close_holes: false

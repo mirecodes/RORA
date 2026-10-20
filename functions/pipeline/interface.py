@@ -14,77 +14,45 @@ from json_handler import JsonHandler
 
 from functions import stage_transform, stage_refine, stage_decompose, stage_segment, stage_articulate, stage_bind, \
     restore_transform
+from functions.lib.config import load_cfg, load_params
 
 
 @dataclass
 class SystemConfigs():
-    # --------------------------------------------------------------------------
-    # User Configurations
-    # --------------------------------------------------------------------------
-
-    # Configuration directories
-    json_config_path = os.path.join(os.path.dirname(__file__), "configs.json")
-
-    # Operational controller
-    enable_stage_align: bool = True
-    restore_align: bool = False
-    enable_stage_refine: bool = True
-    enable_stage_decompose: bool = True
-    enable_stage_segment: bool = True
-    enable_stage_articulate: bool = True
-    enable_stage_bind: bool = True
-    debug_mode: bool = True
-    
-    # URDF Generation Option
-    # If True, the URDF will be generated in the original coordinate system (before transform).
-    # If False, it will be in the transformed coordinate system.
-    urdf_use_original_coordinates: bool = False
-
-    # --------------------------------------------------------------------------
-    # Automatically Generated Configurations
-    # --------------------------------------------------------------------------
-
-    json_cfgs = JsonHandler(json_config_path)
-
-    # Parameters
-    categories_num = json_cfgs.parts.num
-
-    # Directories
-    object_name = json_cfgs.object_name
-    extension = json_cfgs.extension
-
-    in_path = f"data/objects/{object_name}/"
-    out_path = f"export/{object_name}/"
-    working_path = f"working/{object_name}/"
-
-    fname_mesh = f"mesh.{extension}"
-    fname_gaussian = f"gaussian.{extension}"
-
-    root_dir: str = field(default_factory=lambda: project_root, init=False)
-    in_dir: str = field(init=False)
-    out_dir: str = field(init=False)
-    working_dir: str = field(init=False)
+    """Built from cfgs/object_cfg.yml (what to process) and cfgs/parameters_cfg.yml + profile (how)."""
+    obj: dict = field(default_factory=lambda: load_cfg("object_cfg"))
+    params: dict = field(default_factory=lambda: load_params())
+    root_dir: str = field(default=project_root, init=False)
 
     def __post_init__(self):
+        # Pipeline switches
+        pipe = self.params["pipeline"]
+        self.stages = pipe["stages"]
+        self.restore_align = pipe["restore_align"]
+        self.debug_mode = pipe["debug_mode"]
+        self.urdf_use_original_coordinates = pipe["urdf_use_original_coordinates"]
+
+        # Object
+        self.object_name = self.obj["object_name"]
+        self.extension = self.obj["extension"]
+        self.categories_num = self.obj["parts"]["num"]
+
         # Fundamental directories
-        self.in_dir = os.path.abspath(os.path.join(self.root_dir, self.in_path))
-        self.out_dir = os.path.abspath(os.path.join(self.root_dir, self.out_path))
-        self.working_dir = os.path.abspath(os.path.join(self.root_dir, self.working_path))
+        self.in_dir = os.path.join(self.root_dir, "data", "objects", self.object_name)
+        self.out_dir = os.path.join(self.root_dir, "export", self.object_name)
+        self.working_dir = os.path.join(self.root_dir, "working", self.object_name)
 
         # Functional directories
         self.json_attr_dir = os.path.join(self.working_dir, "attributes")
         self.mesh_working_dir = os.path.join(self.working_dir, "meshes")
-        self.json_configs_dir = os.path.join(self.json_attr_dir, "configs.json")
         self.json_states_dir = os.path.join(self.json_attr_dir, "states.json")
 
         self.urdf_working_dir = os.path.join(self.working_dir, "urdf")
         self.urdf_out_dir = os.path.join(self.out_dir, "urdf")
         self.gaussian_out_dir = os.path.join(self.out_dir, "gaussian")
 
-        self.mesh_in_dir = os.path.join(self.in_dir, self.fname_mesh)
-        self.gaussian_in_dir = os.path.join(self.in_dir, self.fname_gaussian)
-        # self.mesh_out_dir = os.path.join(self.out_dir, self.fname_mesh)
-        # self.gaussian_out_dir = os.path.join(self.out_dir, self.fname_gaussian)
+        self.mesh_in_dir = os.path.join(self.in_dir, f"mesh.{self.extension}")
+        self.gaussian_in_dir = os.path.join(self.in_dir, f"gaussian.{self.extension}")
 
         # Create directories if necessary
         self.create_directories()
@@ -119,7 +87,7 @@ def execute_pipeline(cfgs: SystemConfigs):
     stages_time = {}
     pipeline_start = time.time()
 
-    if cfgs.enable_stage_align:
+    if cfgs.stages["align"]:
         start_time = time.time()
         if cfgs.restore_align:
             restore_transform(cfgs)
@@ -130,31 +98,31 @@ def execute_pipeline(cfgs: SystemConfigs):
             print("[info]: Running the alignment stage")
             stages_time["Alignment"] = time.time() - start_time
 
-    if cfgs.enable_stage_refine:
+    if cfgs.stages["refine"]:
         print("[info]: Running the refinement stage")
         start_time = time.time()
         stage_refine(cfgs, debug_mode=cfgs.debug_mode)
         stages_time["Refinement"] = time.time() - start_time
 
-    if cfgs.enable_stage_decompose:
+    if cfgs.stages["decompose"]:
         print("[info]: Running the decomposition stage")
         start_time = time.time()
         stage_decompose(cfgs)
         stages_time["Decomposition"] = time.time() - start_time
 
-    if cfgs.enable_stage_segment:
+    if cfgs.stages["segment"]:
         print("[info]: Running the segmentation stage")
         start_time = time.time()
         stage_segment(cfgs)
         stages_time["Segmentation"] = time.time() - start_time
 
-    if cfgs.enable_stage_articulate:
+    if cfgs.stages["articulate"]:
         print("[info]: Running the articulation stage")
         start_time = time.time()
         stage_articulate(cfgs)
         stages_time["Articulation"] = time.time() - start_time
 
-    if cfgs.enable_stage_bind:
+    if cfgs.stages["bind"]:
         print("[info]: Running the binding stage")
         start_time = time.time()
         stage_bind(cfgs)

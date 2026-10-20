@@ -1,5 +1,4 @@
 import os
-from dataclasses import dataclass
 
 import numpy as np
 import pymeshlab
@@ -8,17 +7,6 @@ from json_handler import JsonHandler
 from scipy.spatial import cKDTree
 from scipy.spatial.transform import Rotation as R
 from plyfile import PlyData, PlyElement
-
-
-# ------------------------------ config ----------------------------------------
-
-@dataclass
-class BindCfgs:
-    k_neighbors: int = 3            # fixed: use k=3
-    # max_dist_rel: float = 0.20      # exclude if nearest vertex farther than this * mesh diagonal
-    max_dist_rel: float = 1.00      # exclude if nearest vertex farther than this * mesh diagonal
-    z_cut_rel: float = -1000.0        # exclude if Gaussian z < (z_cut_rel * mesh diagonal)
-    verbose: bool = True
 
 
 # ------------------------------ helpers ---------------------------------------
@@ -223,13 +211,13 @@ def stage_bind(cfgs):
     gauss_xyz = _get_positions(g_rec)
     print(f"[Info] Loaded {len(gauss_xyz)} Gaussian points")
 
-    bind_cfgs = BindCfgs()  # k=3, thresholds from config
+    bind_cfgs = cfgs.params["bind"]
 
     # --- Z cut by relative threshold to mesh diagonal ---
     diag = float(np.linalg.norm(mesh.bounds[1] - mesh.bounds[0]))
-    z_cut = bind_cfgs.z_cut_rel * diag
+    z_cut = bind_cfgs["z_cut_rel"] * diag
     keep_z = gauss_xyz[:, 2] >= z_cut
-    if bind_cfgs.verbose:
+    if bind_cfgs["verbose"]:
         print(f"[z-cut] diag={diag:.6g}, z_cut={z_cut:.6g}, kept {int(keep_z.sum())}/{len(gauss_xyz)}")
 
     # Work only on survivors of z-cut
@@ -243,15 +231,15 @@ def stage_bind(cfgs):
     print(f"[Info] Running KNN assignment for {len(xyz_kept)} points...")
     assigned_kept = _assign_categories_knn3(
         mesh, vert_labels, xyz_kept,
-        k=bind_cfgs.k_neighbors,
-        max_dist_rel=bind_cfgs.max_dist_rel
+        k=bind_cfgs["k_neighbors"],
+        max_dist_rel=bind_cfgs["max_dist_rel"]
     )
 
     # Rebuild full assignment array with -1 default
     assigned = np.full(len(gauss_xyz), -1, dtype=np.int32)
     assigned[keep_z] = assigned_kept
 
-    if bind_cfgs.verbose:
+    if bind_cfgs["verbose"]:
         uniq, cnts = np.unique(assigned, return_counts=True)
         print("[assign-knn3] label counts (including -1 excluded):", dict(zip(uniq.tolist(), cnts.tolist())))
 

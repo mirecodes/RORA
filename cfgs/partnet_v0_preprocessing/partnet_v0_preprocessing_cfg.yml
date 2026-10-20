@@ -1,0 +1,46 @@
+# PartNet v0 preprocessing (functions/partnet_v0_preprocessing)
+# Paths are derived from the object name:
+#   Input : data/preprocess/partnet_v0/<name>/mobility.urdf
+#   Output: data/objects/<name>/mesh.ply        (voxel_remeshing.py)
+#           data/objects/<name>/mesh_fused.ply  (merge_manifold.py)
+
+# Objects to process in this run (must be keys of `objects`)
+targets: [faucet]
+# targets: [toilet, faucet, folding_chair, box, refrigerator, toaster, lamp, dispenser, safe, stapler]
+
+# voxel_remeshing.py
+voxel:
+  pitch: 0.02           # voxel size in meters
+  rotation_deg: 0       # rotation around Z before voxelizing (e.g. 90, 180, 270)
+
+# joint_offset: {joint name: value} applied before merging. Omit = rest pose.
+# voxel_remeshing converts values deg -> rad; merge_manifold passes them as-is.
+objects:
+  # Category 1: Simple Objects
+  microwave:
+    joint_offset: {joint_0: 45}
+  bucket:
+    joint_offset: {joint_0: 90}
+  trashcan:
+  fan:
+  globe:
+  usb:
+    joint_offset: {joint_0: -0.132}
+
+  # Category 2: Complex Objects
+  toilet:
+    joint_offset: {joint_0: 0, joint_1: 60, joint_2: 30, joint_3: 0}
+  faucet:
+    joint_offset: {joint_3: 180}
+  folding_chair:
+  box:
+  refrigerator:
+    joint_offset: {joint_1: 45, joint_2: 45}
+  toaster:
+
+  # Category 3: Chained Objects
+  lamp:
+  dispenser:
+  safe:
+  stapler:
+    joint_offset: {joint_0: 45, joint_1: 90}

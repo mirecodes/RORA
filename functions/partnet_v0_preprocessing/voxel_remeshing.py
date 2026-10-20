@@ -1,25 +1,18 @@
+import os
+import sys
+
 import numpy as np
 import trimesh
 from yourdfpy import URDF
-import os
-import yaml
-from dataclasses import dataclass, field
-from typing import List
 
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if ROOT not in sys.path:
+    sys.path.append(ROOT)
 
-@dataclass
-class VoxelConfig:
-    # List of object names to process (must match keys in the YAML config)
-    object_names: List[str] = field(default_factory=lambda: ["usb"])
+from functions.lib.config import load_cfg
 
-    # Path to the YAML configuration file
-    config_file: str = "merge_config.yml"
-
-    # Voxel pitch (resolution) in meters
-    voxel_pitch: float = 0.005
-
-    # Rotation around Z-axis in degrees
-    rotation_deg: float = 0.0
+INPUT_DIR = os.path.join(ROOT, "data", "preprocess", "partnet_v0")   # <name>/mobility.urdf
+OUTPUT_DIR = os.path.join(ROOT, "data", "objects")                   # <name>/mesh.ply (pipeline input)
 
 
 def merge_urdf_voxel_ply(urdf_path, joint_cfg, output_path="fused_voxel.ply", voxel_pitch=0.005, rotation_deg=0.0):
@@ -133,57 +126,25 @@ def merge_urdf_voxel_ply(urdf_path, joint_cfg, output_path="fused_voxel.ply", vo
 
 
 if __name__ == "__main__":
-    # --- Configuration ---
-    cfg = VoxelConfig(
-        # object_names=['toilet', 'faucet', 'folding_chair', 'box', 'refrigerator', 'toaster', 'lamp', 'dispenser', 'safe', 'stapler'],  # 처리할 오브젝트 목록
-        object_names=['faucet'],
-        config_file="merge_config.yml",
-        voxel_pitch=0.02,
-        rotation_deg=0  # 예: 90, 180, 270 등
-    )
-    # ---------------------
+    # Settings: cfgs/partnet_v0_preprocessing/partnet_v0_preprocessing_cfg.yml
+    cfg = load_cfg("partnet_v0_preprocessing/partnet_v0_preprocessing_cfg")
+    objects, voxel = cfg["objects"], cfg["voxel"]
 
-    config_path = cfg.config_file
-    if not os.path.exists(config_path):
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        config_path = os.path.join(script_dir, cfg.config_file)
-
-    if not os.path.exists(config_path):
-        print(f"[Error] Config file not found: {cfg.config_file}")
-        exit(1)
-
-    with open(config_path, 'r') as f:
-        full_config = yaml.safe_load(f)
-
-    base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-    for object_name in cfg.object_names:
+    for object_name in cfg["targets"]:
         print(f"\n{'='*50}")
         print(f"[Info] Processing: {object_name}")
         print(f"{'='*50}")
 
-        if object_name not in full_config:
-            print(f"[Skip] '{object_name}' not found in configuration file.")
-            print(f"  Available objects: {list(full_config.keys())}")
+        if object_name not in objects:
+            print(f"[Skip] '{object_name}' not found in cfg objects: {list(objects)}")
             continue
 
-        obj_config = full_config[object_name]
-
-        urdf_path = obj_config.get("urdf_path")
-        joint_cfg = obj_config.get("joint_config") or {}
-        output_dir = obj_config.get("output_dir", "export/merged")
-
-        # Resolve paths
-        if not os.path.isabs(urdf_path):
-            urdf_path = os.path.join(base_path, urdf_path)
-
-        if not os.path.isabs(output_dir):
-            output_dir = os.path.join(base_path, output_dir)
-
-        output_filename = f"{object_name}_voxel.ply"
-        output_path = os.path.join(output_dir, output_filename)
+        urdf_path = os.path.join(INPUT_DIR, object_name, "mobility.urdf")
+        output_path = os.path.join(OUTPUT_DIR, object_name, "mesh.ply")
+        joint_cfg = (objects[object_name] or {}).get("joint_offset") or {}
 
         if os.path.exists(urdf_path):
-            merge_urdf_voxel_ply(urdf_path, joint_cfg, output_path, voxel_pitch=cfg.voxel_pitch, rotation_deg=cfg.rotation_deg)
+            merge_urdf_voxel_ply(urdf_path, joint_cfg, output_path,
+                                 voxel_pitch=voxel["pitch"], rotation_deg=voxel["rotation_deg"])
         else:
             print(f"[Error] URDF file not found: {urdf_path}")

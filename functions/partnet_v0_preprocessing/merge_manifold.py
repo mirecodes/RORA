@@ -1,19 +1,19 @@
+import os
+import sys
+
 import numpy as np
 import trimesh
 import manifold3d as m3d
 from yourdfpy import URDF
-import os
-import yaml
-from dataclasses import dataclass
 
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if ROOT not in sys.path:
+    sys.path.append(ROOT)
 
-@dataclass
-class MergeConfig:
-    # Name of the object to process (must match a key in the YAML config)
-    object_name: str = "folding_chair"
-    
-    # Path to the YAML configuration file
-    config_file: str = "merge_config.yml"
+from functions.lib.config import load_cfg
+
+INPUT_DIR = os.path.join(ROOT, "data", "preprocess", "partnet_v0")   # <name>/mobility.urdf
+OUTPUT_DIR = os.path.join(ROOT, "data", "objects")                   # <name>/mesh_fused.ply
 
 
 def merge_urdf_manifold_ply(urdf_path, joint_cfg, output_path="fused_mesh.ply"):
@@ -114,50 +114,20 @@ def merge_urdf_manifold_ply(urdf_path, joint_cfg, output_path="fused_mesh.ply"):
 
 
 if __name__ == "__main__":
-    # --- Configuration ---
-    cfg = MergeConfig(
-        object_name="microwave",  # Change this to "fridge" or other keys in yml
-        config_file="merge_config.yml"
-    )
-    # ---------------------
+    # Settings: cfgs/partnet_v0_preprocessing/partnet_v0_preprocessing_cfg.yml
+    cfg = load_cfg("partnet_v0_preprocessing/partnet_v0_preprocessing_cfg")
+    objects = cfg["objects"]
 
-    config_path = cfg.config_file
-    if not os.path.exists(config_path):
-        # Try looking in the same directory as the script
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        config_path = os.path.join(script_dir, cfg.config_file)
-    
-    if not os.path.exists(config_path):
-        print(f"[Error] Config file not found: {cfg.config_file}")
-        exit(1)
+    for object_name in cfg["targets"]:
+        if object_name not in objects:
+            print(f"[Skip] '{object_name}' not found in cfg objects: {list(objects)}")
+            continue
 
-    with open(config_path, 'r') as f:
-        full_config = yaml.safe_load(f)
+        urdf_path = os.path.join(INPUT_DIR, object_name, "mobility.urdf")
+        output_path = os.path.join(OUTPUT_DIR, object_name, "mesh_fused.ply")
+        joint_cfg = (objects[object_name] or {}).get("joint_offset") or {}
 
-    object_name = cfg.object_name
-    if object_name not in full_config:
-        print(f"[Error] Object '{object_name}' not found in configuration file.")
-        print(f"Available objects: {list(full_config.keys())}")
-        exit(1)
-
-    obj_config = full_config[object_name]
-    
-    urdf_path = obj_config.get("urdf_path")
-    joint_cfg = obj_config.get("joint_config", {})
-    output_dir = obj_config.get("output_dir", "export/merged")
-
-    # Resolve paths
-    base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    if not os.path.isabs(urdf_path):
-        urdf_path = os.path.join(base_path, urdf_path)
-    
-    if not os.path.isabs(output_dir):
-        output_dir = os.path.join(base_path, output_dir)
-        
-    output_filename = f"{object_name}_fused.ply"
-    output_path = os.path.join(output_dir, output_filename)
-
-    if os.path.exists(urdf_path):
-        merge_urdf_manifold_ply(urdf_path, joint_cfg, output_path)
-    else:
-        print(f"[Error] URDF file not found: {urdf_path}")
+        if os.path.exists(urdf_path):
+            merge_urdf_manifold_ply(urdf_path, joint_cfg, output_path)
+        else:
+            print(f"[Error] URDF file not found: {urdf_path}")

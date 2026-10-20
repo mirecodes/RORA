@@ -57,15 +57,13 @@ def stage_articulate(cfgs):
     else:
         print("[info]: Generating URDF in ALIGNED coordinate system.")
 
-    # Generate URDF File
+    # Generate URDF File (urdf_name / density / mesh_fmt from parameters_cfg.yml)
     urdf_dir = generate_urdf(
         closed_parts=links,
         joints=joints,
         out_dir=cfgs.urdf_out_dir,
-        urdf_name="object",
-        density=1000.0,   # 필요시 변경
-        mesh_fmt="stl",
-        transform_matrix=transform_matrix
+        transform_matrix=transform_matrix,
+        **cfgs.params["articulate"]
     )
 
     print(f"[info]: the urdf file has been generated in: {urdf_dir}")

@@ -7,7 +7,6 @@ import vedo
 from plyfile import PlyData, PlyElement
 from json_handler import JsonHandler
 from functools import partial
-from dataclasses import dataclass
 
 from functions import calculate_transforms
 
@@ -248,18 +247,8 @@ def key_press_callback(e, *, assembly=None, plt=None, angle_step: float = 1.0, t
 
 # ------------------------------- main stage ----------------------------------
 
-@dataclass
-class TransformConfig:
-    """
-    Configuration for the transform stage.
-    """
-    use_auto_alignment: bool = True  # If True, attempts to align mesh using PCA/RANSAC (z-up).
-                                     # If False, uses the original coordinate system (Identity).
-    gaussian_scale: float = 100.0      # Scale factor for Gaussian positions (e.g. 100.0 for m->cm conversion)
-
-def stage_transform(cfgs, transform_config: TransformConfig = None):
-    if transform_config is None:
-        transform_config = TransformConfig()
+def stage_transform(cfgs):
+    tf_cfgs = cfgs.params["transform"]
 
     ms = pymeshlab.MeshSet()
     try:
@@ -272,7 +261,7 @@ def stage_transform(cfgs, transform_config: TransformConfig = None):
 
     mesh = ms.mesh(0)
     
-    if transform_config.use_auto_alignment:
+    if tf_cfgs["use_auto_alignment"]:
         initial_transform = calculate_transforms(ms)  # 4x4
         if initial_transform is None:
             print("[Warning] Auto-alignment failed. Using Identity.")

@@ -6,7 +6,6 @@ import vedo
 from typing import Dict, List, Tuple
 from collections import defaultdict
 from functools import partial
-from dataclasses import dataclass
 
 from json_handler import JsonHandler
 from functions.lib.geometry import normalize, closest_points_between_lines
@@ -17,14 +16,6 @@ from functions.lib.urdf import build_joints_from_rlps
 from functions.lib.visualization import recolor_parts, select_parts_interactive, visualize_and_select_vectors_for_rlps, visualize_rlp_clustering, visualize_segmented_parts
 
 
-@dataclass
-class SegmentConfig:
-    neighbor_threshold: float = 0.25
-    allow_single_loop_rlp: bool = True
-    min_size_to_keep: int = 0
-    show_none_loops: bool = False
-
-
 # =============================================================================
 # Pipeline helpers (separation, vectors, patches)
 # =============================================================================
@@ -33,11 +24,8 @@ def compute_separation_results(ms: pymeshlab.MeshSet,
                                categories_num: int,
                                adj,
                                vert_label,
-                               method: str = "all",
                                visualize_results: bool = False,
-                               neighbor_threshold: float = 0.25,
-                               min_size_to_keep: int = 5,
-                               show_none_loops: bool = False) -> List[dict]:
+                               **separator_kwargs) -> List[dict]:
     """Run learn_separator_main per category and flatten outputs."""
     results: Dict[int, dict | List[dict]] = {}
     print(f"[info] Starting separation computation for {categories_num} categories...")
@@ -45,14 +33,8 @@ def compute_separation_results(ms: pymeshlab.MeshSet,
         print(f"[info] Processing category {idx_part}/{categories_num}...")
         out = learn_separator_main(
             ms, categories, idx_part, adj, vert_label,
-            max_hops=10, method=method,
-            C=1.0, gamma='scale',
-            use_signed_dist=True, sdf_thresh=0.0,
-            balance='None',
             visualize_results=visualize_results,
-            neighbor_threshold=neighbor_threshold,
-            min_size_to_keep=min_size_to_keep,
-            show_none_loops=show_none_loops
+            **separator_kwargs
         )
         results[idx_part] = out
     results_list = [item for v in results.values() for item in (v if isinstance(v, list) else [v])]
@@ -367,7 +349,7 @@ def stage_segment(cfgs):
     5) Persist states (states.segment.*)
     """
 
-    segCfgs = SegmentConfig
+    segCfgs = cfgs.params["segment"]
 
     print("=" * 60)
     print("[info] Starting stage_segment...")
@@ -435,34 +417,27 @@ def stage_segment(cfgs):
         visualize_segmented_parts(verts, faces, vert_label, display=cfgs.debug_mode)
 
     # separation + clustering + vectors
-    # Pass neighbor_threshold, min_size_to_keep, and show_none_loops from cfgs if available
-    neighbor_threshold = getattr(segCfgs, 'neighbor_threshold', 0.25)
-    min_size_to_keep = getattr(segCfgs, 'min_size_to_keep', 5)
-    show_none_loops = getattr(segCfgs, 'show_none_loops', False)
-    
     print("[info] Computing separation results...")
     results_list = compute_separation_results(
-        ms, categories, categories_num, adj, vert_label, 
-        method="all", visualize_results=cfgs.debug_mode,
-        neighbor_threshold=neighbor_threshold,
-        min_size_to_keep=min_size_to_keep,
-        show_none_loops=show_none_loops
+        ms, categories, categories_num, adj, vert_label,
+        visualize_results=cfgs.debug_mode,
+        **segCfgs["separator"]
     )
-    
+
     print("[info] Clustering reciprocal loop pairs (RLPs)...")
-    rlps = cluster_reciprocal_loop_pairs(results_list, w_pos=1.0, w_ang=0.5, cost_max=None)
+    rlps = cluster_reciprocal_loop_pairs(results_list, **segCfgs["rlp_clustering"])
 
     # Visualizing the RLP clustering details
     if cfgs.debug_mode:
         visualize_rlp_clustering(verts, faces, parts, categories, results_list, rlps)
 
-    if getattr(segCfgs, 'allow_single_loop_rlp', False):
+    if segCfgs["allow_single_loop_rlp"]:
         append_single_loop_rlps(results_list, rlps, verts)
 
     print(f"[info]: len rlps {len(rlps)}")
     
     prepare_vectors_for_rlps(rlps)
-    augment_vectors_for_pairs_with_map(rlps, min_count=2)  # optional
+    augment_vectors_for_pairs_with_map(rlps, min_count=segCfgs["vector_augment_min_count"])  # optional
 
     # vector selection UI (RLP-wise)
     if cfgs.debug_mode:

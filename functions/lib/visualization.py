@@ -1,5 +1,4 @@
 import os
-import json
 import numpy as np
 import vedo
 import trimesh
@@ -7,6 +6,7 @@ from typing import List, Dict, Any
 from functools import partial
 import pymeshlab
 
+from functions.lib.config import load_params
 from functions.lib.geometry import normalize, rotmat
 
 # =============================================================================
@@ -47,31 +47,11 @@ def get_vector_scale_factors(length_factor: float | None = None, thickness_facto
     if length_factor is not None and thickness_factor is not None:
         return float(length_factor), float(thickness_factor)
 
-    possible_paths = [
-        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "pipeline", "configs.json")),
-        os.path.abspath(os.path.join(os.getcwd(), "functions", "pipeline", "configs.json")),
-        os.path.abspath(os.path.join(os.getcwd(), "configs.json")),
-    ]
-
     try:
-        import glob
-        work_cfgs = glob.glob(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "working", "*", "attributes", "configs.json")))
-        possible_paths.extend(work_cfgs)
+        vscale = load_params()["visualization"]["vector_scale"]
+        return float(vscale["length_factor"]), float(vscale["thickness_factor"])
     except Exception:
         pass
-
-    for cfg_path in possible_paths:
-        if os.path.exists(cfg_path):
-            try:
-                with open(cfg_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    vscale = data.get("vector_scale", {})
-                    if "length_factor" in vscale and "thickness_factor" in vscale:
-                        lf = float(vscale["length_factor"])
-                        tf = float(vscale["thickness_factor"])
-                        return lf, tf
-            except Exception:
-                continue
 
     return 1.0, 1.0
 
@@ -79,7 +59,7 @@ def get_vector_scale_factors(length_factor: float | None = None, thickness_facto
 def get_standard_arrow_params(verts: np.ndarray, length_factor: float | None = None, thickness_factor: float | None = None):
     """
     Unified arrow size & thickness parameters across Plane estimation and RLP visualizations.
-    Dynamically scaled by vector_scale factors in configs.json.
+    Dynamically scaled by visualization.vector_scale in cfgs/parameters_cfg.yml.
     """
     lf, tf = get_vector_scale_factors(length_factor, thickness_factor)
     scene_diag = float(np.linalg.norm(verts.max(axis=0) - verts.min(axis=0)))
