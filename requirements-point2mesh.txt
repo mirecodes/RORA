@@ -1,12 +1,11 @@
-# Separate env for the point2mesh submodule (run by functions/stages/refine.py via subprocess).
+# Separate env for the point2mesh submodule (run by functions/stages/refine.py -> point2mesh_runner.py).
 #   python3 -m venv submodules/point2mesh/.venv
 #   submodules/point2mesh/.venv/bin/pip install torch==2.13.0 torchvision==0.28.0
 #   submodules/point2mesh/.venv/bin/pip install --no-build-isolation -r requirements-point2mesh.txt
-#   git -C submodules/point2mesh apply ../point2mesh.patch
+#   Submodule stays unmodified; functions/stages/point2mesh_runner.py applies numpy/mesh fixes at runtime.
 torch==2.13.0
 torchvision==0.28.0
 numpy==2.5.2
-trimesh==5.0.0
 fvcore==0.1.5.post20221221
 iopath==0.1.10
 pytorch3d @ git+https://github.com/facebookresearch/pytorch3d.git@fdaf9bd6fed7977e4c2056e7c77c640781e58fcd

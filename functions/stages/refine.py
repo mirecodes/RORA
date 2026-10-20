@@ -1,4 +1,5 @@
 import os
+import numpy as np
 import pymeshlab
 import trimesh
 import vedo
@@ -91,12 +92,19 @@ def run_point2mesh_refinement(cfgs, input_mesh_path: str = None, debug_mode: boo
     save_dir = os.path.abspath(os.path.join(cfgs.mesh_working_dir, "point2mesh_out"))
     os.makedirs(save_dir, exist_ok=True)
 
-    # Point2Mesh execution command
+    # Convert to the formats point2mesh reads natively: initial mesh (.obj), point cloud with normals (.xyz)
+    init_obj = os.path.join(save_dir, "initial_mesh.obj")
+    input_xyz = os.path.join(save_dir, "input_pc.xyz")
+    tm = trimesh.load(mesh_in_dir, force="mesh", process=False)
+    tm.export(init_obj)
+    np.savetxt(input_xyz, np.hstack([tm.vertices, tm.vertex_normals]), fmt="%.6f")
+
+    # Point2Mesh execution command (runner applies runtime fixes; the submodule stays unmodified)
     cmd = [
         p2m_venv_python,
-        os.path.join(p2m_dir, "main.py"),
-        "--input-pc", mesh_in_dir,
-        "--initial-mesh", mesh_in_dir,
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "point2mesh_runner.py"),
+        "--input-pc", input_xyz,
+        "--initial-mesh", init_obj,
         "--save-path", save_dir,
         "--iterations", str(p2m_cfgs["iterations"]),
         "--gpu", str(p2m_cfgs["gpu"])

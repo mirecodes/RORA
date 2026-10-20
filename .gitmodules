@@ -1,4 +1,4 @@
 [submodule "point2mesh"]
 	path = submodules/point2mesh
 	url = https://github.com/ranahanocka/point2mesh.git
-	ignore = dirty
+	ignore = untracked
