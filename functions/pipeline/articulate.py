@@ -85,20 +85,22 @@ def prepare_vectors_for_bicons(bicons: List[dict]) -> None:
 
 def build_extrapoints_and_patches(unicons: List[dict],
                                   verts: np.ndarray):
-    """For each cycle: dense sampling + triangulated patch."""
+    """For each ordered raw cycle: dense sampling + triangulated patch."""
     print("[info] Building extra points and patches...")
     patch_vertices: Dict[int, List[np.ndarray]] = defaultdict(list)
     patch_faces: Dict[int, List[np.ndarray]] = defaultdict(list)
     for unicon in unicons:
         pid = int(unicon.get('src', 0))
-        cycle_idx = unicon.get('cycle', None)
-        if pid <= 0 or cycle_idx is None or len(cycle_idx) < 3:
+        if pid <= 0:
             continue
-        cycle_xyz = verts[np.asarray(cycle_idx, dtype=int)]
-        P3, F = cycle_patch(cycle_xyz, step_rel=0.03, sigma_scale=2.0, k_min=6)
-        if P3.size and F.size:
-            patch_vertices[pid].append(P3.astype(float))
-            patch_faces[pid].append(F.astype(np.int64))
+        # 'cycle' may be an unordered merged set; the patch needs the ordered raw cycles
+        for raw in unicon.get('raw_cycles', []):
+            if len(raw) < 3:
+                continue
+            P3, F = cycle_patch(verts[np.asarray(raw, dtype=int)], step_rel=0.03, sigma_scale=2.0, k_min=6)
+            if P3.size and F.size:
+                patch_vertices[pid].append(P3.astype(float))
+                patch_faces[pid].append(F.astype(np.int64))
     print("[info] Patch building finished.")
     return patch_vertices, patch_faces
 

@@ -2,6 +2,10 @@
 # Only keys listed here override parameters_cfg.yml.
 # Refine = cleaning -> decimation -> remeshing -> attribute transfer (former refine_dataset.py).
 
+# transform:
+#   use_auto_alignment: false 
+
+
 refine:
   pymeshlab:
     do_flatten_bottom: false

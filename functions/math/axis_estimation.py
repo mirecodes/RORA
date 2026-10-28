@@ -171,7 +171,8 @@ def estimate_unicons(verts: np.ndarray,
     # Boundary cycles; cycles within 2 hops count as one boundary
     cycles = part_boundary_cycles(faces, idx_seeds)
     print(f"[debug] Raw cycles: {len(cycles)} (sizes: {[len(c) for c in cycles]})")
-    cycles = merge_cycles(adj, cycles, max_hops=2, min_size=min_size_to_keep)
+    merged = merge_cycles(adj, cycles, max_hops=2, min_size=min_size_to_keep)
+    cycles, raw_per_cycle = [m[0] for m in merged], [m[1] for m in merged]
     print(f"[info] Found {len(cycles)} cycles for part {idx_part}.")
 
     nbrs_per_cycle = [cycle_neighbors(c, adj, vert_label, idx_part, neighbor_threshold) for c in cycles]
@@ -183,7 +184,7 @@ def estimate_unicons(verts: np.ndarray,
         ["single_plane", "rbf", "multi_plane"] if method == "all" else [str(method)]
 
     unicons = []
-    for order, (cycle, nbrs) in enumerate(zip(cycles, nbrs_per_cycle)):
+    for order, (cycle, raw_cycles, nbrs) in enumerate(zip(cycles, raw_per_cycle, nbrs_per_cycle)):
         print(f"[info] Processing cycle {order + 1}/{len(cycles)} (size: {len(cycle)})...")
         # Positives: own part, negatives: other parts, within max_hops of the cycle
         idx_neighbor, dist = k_hop(adj, cycle, max_hops)
@@ -227,7 +228,7 @@ def estimate_unicons(verts: np.ndarray,
         # One unicon per neighbor part
         for nbr in nbrs:
             unicons.append({
-                "src": idx_part, "dst": nbr, "cycle": cycle,
+                "src": idx_part, "dst": nbr, "cycle": cycle, "raw_cycles": raw_cycles,
                 "center": center, "pca_normal": pca_normal, "vert_label": vert_label,
                 "idx_pos": idx_pos, "idx_neg": idx_neg, "idx_neighbor": idx_neighbor, "dist": dist,
                 "single_plane": fits.get("single_plane", {}), "rbf": fits.get("rbf", {}),

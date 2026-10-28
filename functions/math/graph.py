@@ -166,9 +166,11 @@ def part_boundary_cycles(faces: np.ndarray,
     return selected
 
 
-def merge_cycles(adj, cycles: list[np.ndarray], max_hops: int = 2, min_size: int = 10) -> list[np.ndarray]:
+def merge_cycles(adj, cycles: list[np.ndarray], max_hops: int = 2,
+                 min_size: int = 10) -> list[tuple[np.ndarray, list[np.ndarray]]]:
     """Merge cycles within max_hops edges of each other; drop merged cycles smaller than min_size.
-    Merged cycles are unordered vertex sets (fine for PCA/SVM). Sorted largest first."""
+    Returns (vertex set, ordered raw cycles) pairs, largest first. A merged set is unordered
+    (fine for PCA/SVM); anything that needs a polygon (patch filling) must use the raw cycles."""
     if not cycles:
         return []
     cycle_sets = [set(c) for c in cycles]
@@ -195,10 +197,11 @@ def merge_cycles(adj, cycles: list[np.ndarray], max_hops: int = 2, min_size: int
                 if not visited[nb]:
                     visited[nb] = True
                     stack.append(nb)
-        cycle = cycles[comp[0]] if len(comp) == 1 else np.unique(np.concatenate([cycles[c] for c in comp]))
+        raw = [cycles[c] for c in comp]
+        cycle = raw[0] if len(raw) == 1 else np.unique(np.concatenate(raw))
         if len(cycle) >= min_size:
-            merged.append(cycle)
-    merged.sort(key=len, reverse=True)
+            merged.append((cycle, raw))
+    merged.sort(key=lambda m: len(m[0]), reverse=True)
     return merged
 
 
