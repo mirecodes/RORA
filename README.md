@@ -68,6 +68,7 @@ profile: real_object        # real_object (real scan) | partnet_object (PartNet 
 | `pipeline.debug_mode` | Pause at intermediate results in the viewport (ignored with `--minimal`). |
 | `refine.method` | `pymeshlab` (default) or `point2mesh`. |
 | `decompose.coacd.threshold` | Lower = finer decomposition. |
+| `articulate.suggestion_urdf` | Also write every suggested joint vector, before human selection, to `working/<object>/urdf/` (evaluation `suggest`). |
 
 `cfgs/profiles/<profile>_params_cfg.yml` overrides `parameters_cfg.yml`, only for the keys it lists.
 An object profile saved from the GUI (`object_cfg.yml: object_profile`, stored in `cfgs/profiles/objects/`)
@@ -88,7 +89,7 @@ Hover a stage to **↻ re-run** it or **▶ run from** it; edit parameters first
 **Save object profile** writes every stage setting for this object to
 `cfgs/profiles/objects/<object>_<date>_<time>.yml` (shared yml files are never changed).
 
-- **align**: seat the object on z = 0 with Front along +X. Rotate X/Y/Z: `N/B`, `J/H`, `I/U`.
+- **align**: seat the object on z = 0 with Front along +X. Rotate X/Y/Z: `←/→`, `↑/↓`, `Q/E`.
   Move X/Y/Z: `W/S`, `D/A`, `Space/Z`. Or drag the gizmo, or type values in the panel. `Enter`: done.
 - **segment (parts)**: pick a part chip (or `Tab`), left click assigns a fragment, right click reverts.
 - **articulate (joint axis)**: click an arrow to cycle None → Revolute (amber) → Prismatic (blue);
@@ -108,6 +109,9 @@ export/<object_name>/
 └── gaussian/gaussian_*.ply    # per-part Gaussians
 working/<object_name>/
 ├── meshes/                    # refined mesh, fragment_*.ply (decompose), links/link_*.ply (articulate)
+├── urdf/                      # articulate.suggestion_urdf: links fixed to base, one suggest_<a>_<b>_<k> joint per candidate
+│   ├── object.urdf
+│   └── meshes/link_*.stl
 └── attributes/
     ├── states.json            # paths and per-stage results
     └── vert_label.npy         # per-vertex part labels of the refined mesh (segment → articulate, bind)
@@ -144,6 +148,7 @@ Merges the part meshes of a PartNet-Mobility URDF, posed by joint offsets, into 
 data/preprocess/partnet_v0/<name>/mobility.urdf          (input)
         │  apply joint offsets → merge part meshes
         ├─ voxel    → data/objects/<name>/mesh.ply        (pipeline input)
+        │             data/objects/<name>/mesh.glb        (same remeshed mesh)
         └─ manifold → data/objects/<name>/mesh_fused.ply  (reference)
 ```
 

@@ -2,10 +2,11 @@
 # Paths are derived from the object name:
 #   Input : data/preprocess/partnet_v0/<name>/mobility.urdf
 #   Output: data/objects/<name>/mesh.ply        (voxel_remeshing.py)
+#           data/objects/<name>/mesh.glb        (voxel_remeshing.py, same remeshed mesh)
 #           data/objects/<name>/mesh_fused.ply  (merge_manifold.py)
 
 # Objects to process in this run (must be keys of `objects`)
-targets: [faucet]
+targets: [microwave, bucket, trashcan, fan, globe, usb, toilet, faucet, folding_chair, box, refrigerator, toaster, lamp, dispenser, safe, stapler]
 # targets: [toilet, faucet, folding_chair, box, refrigerator, toaster, lamp, dispenser, safe, stapler]
 
 # voxel_remeshing.py

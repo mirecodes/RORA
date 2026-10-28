@@ -86,7 +86,7 @@ class StageRow(QWidget):
         header.setContentsMargins(0, 2, 0, 2)
         header.setSpacing(8)
         header.addWidget(self.check)
-        header.addSpacing(4)
+        header.addSpacing(14)   # keeps the rail clear of the checkboxes
         header.addWidget(self.dot)
         header.addWidget(self.name)
         header.addStretch()

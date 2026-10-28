@@ -28,26 +28,32 @@ def _apply(T, p) -> np.ndarray:
 # =============================================================================
 # Joints
 # =============================================================================
-def joints_from_bicons(bicons: list[dict]) -> list[dict]:
-    """Joint candidates from the vectors selected on bicons (state Revolute/Prismatic).
-    Vectors of one part pair sharing an origin merge: 2+ revolute -> Spherical, 2+ prismatic -> Planar.
-    parent/child are (min, max) here; spanning_tree() decides the direction."""
-    picked = []
+def suggestions_from_bicons(bicons: list[dict]) -> list[dict]:
+    """Every vector candidate on the bicons, whatever its selection state:
+    {"pair": (min, max), "origin", "n", "state"}."""
+    out = []
     for bicon in bicons:
         p = int(bicon.get("a", {}).get("src", bicon.get("src", -1)))
         c = int(bicon.get("a", {}).get("dst", bicon.get("dst", -1)))
         if p < 0 or c < 0 or p == c:
             continue
         for v in bicon.get("vectors") or []:
-            if v.get("state") not in ("Revolute", "Prismatic"):
-                continue
             o = np.asarray(v.get("center", bicon.get("center", [0, 0, 0])), dtype=float).ravel()
             n = np.asarray(v.get("n") if v.get("n") is not None else v.get("n_poly"), dtype=float).ravel()
             if o.size != 3 or n.size != 3:
                 continue
             n = normalize(n)
             if np.isfinite(o).all() and np.isfinite(n).all() and np.linalg.norm(n) >= 1e-12:
-                picked.append({"pair": (min(p, c), max(p, c)), "origin": o, "n": n, "type": v["state"]})
+                out.append({"pair": (min(p, c), max(p, c)), "origin": o, "n": n, "state": v.get("state")})
+    return out
+
+
+def joints_from_bicons(bicons: list[dict]) -> list[dict]:
+    """Joint candidates from the vectors selected on bicons (state Revolute/Prismatic).
+    Vectors of one part pair sharing an origin merge: 2+ revolute -> Spherical, 2+ prismatic -> Planar.
+    parent/child are (min, max) here; spanning_tree() decides the direction."""
+    picked = [{**s, "type": s["state"]} for s in suggestions_from_bicons(bicons)
+              if s["state"] in ("Revolute", "Prismatic")]
     if not picked:
         return []
 
@@ -123,9 +129,12 @@ def generate_urdf(closed_parts: dict[int, trimesh.Trimesh],
                   density: float = 1000.0,
                   mesh_fmt: str = "stl",
                   base_origin=(0.0, 0.0, 0.0),
-                  transform_matrix: np.ndarray = None) -> str:
+                  transform_matrix: np.ndarray = None,
+                  suggestions: list[dict] = ()) -> str:
     """Write out_dir/<urdf_name>.urdf and out_dir/meshes/link_<id>.<mesh_fmt>.
-    Meshes stay in world coords; each link frame sits at its joint origin."""
+    Meshes stay in world coords; each link frame sits at its joint origin.
+    suggestions (from suggestions_from_bicons) become massless leaf links on link_<a>, one revolute joint
+    suggest_<a>_<b>_<k> each at the candidate's origin/axis, so every candidate survives the tree."""
     T = transform_matrix
     meshes = {}
     os.makedirs(os.path.join(out_dir, "meshes"), exist_ok=True)
@@ -177,6 +186,17 @@ def generate_urdf(closed_parts: dict[int, trimesh.Trimesh],
             ET.SubElement(j_el, "axis", xyz=_xyz(axis))
         if urdf_type in ("revolute", "prismatic"):
             ET.SubElement(j_el, "limit", lower="-1.57", upper="1.57", effort="10.0", velocity="1.0")
+
+    for k, s in enumerate(suggestions):
+        a, b = s["pair"]
+        name = f"suggest_{a}_{b}_{k}"
+        ET.SubElement(robot, "link", name=f"{name}_axis")
+        j_el = ET.SubElement(robot, "joint", name=name, type="revolute")  # suggestions carry no joint type
+        ET.SubElement(j_el, "parent", link=f"link_{a}")
+        ET.SubElement(j_el, "child", link=f"{name}_axis")
+        ET.SubElement(j_el, "origin", xyz=_xyz(_apply(T, s["origin"]) - link_o(a)), rpy="0 0 0")
+        ET.SubElement(j_el, "axis", xyz=_xyz(normalize(s["n"] if T is None else T[:3, :3] @ s["n"])))
+        ET.SubElement(j_el, "limit", lower="-1.57", upper="1.57", effort="10.0", velocity="1.0")
 
     # Fix the tree root and every unreached link to base
     if link_ids:

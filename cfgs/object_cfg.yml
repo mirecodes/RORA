@@ -1,12 +1,12 @@
 # Target object. Input is read from data/objects/<object_name>/{mesh,gaussian}.<extension>
-object_name: apr_diffuser
+object_name: box
 extension: ply
 
 parts:
-  num: 3          # number of parts the convex fragments are grouped into (segment stage)
+  num: 5          # number of parts the convex fragments are grouped into (segment stage)
 
 # Overlay cfgs/profiles/<profile>_params_cfg.yml on parameters_cfg.yml (null = base only)
-profile: real_object    # real_object | partnet_object
+profile: partnet_object    # real_object | partnet_object
 
 # GUI-saved snapshot cfgs/profiles/objects/<stem>.yml, applied after the shared profile (null = none)
-object_profile: null
+object_profile: 

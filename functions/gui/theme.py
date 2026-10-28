@@ -1,4 +1,5 @@
 """Light/dark design tokens shared by the Qt widgets and the VTK viewport. Qt-free."""
+import os
 from dataclasses import dataclass
 
 
@@ -26,16 +27,18 @@ class Theme:
     axis_y: str
     axis_z: str
     hover: str       # gizmo / view cube hover highlight
+    cube: str        # view cube faces (must stand out from the viewport gradient)
 
 
 DARK = Theme("dark", bg="#1b1d22", panel="#1f2127", line="#2c2f36", text="#e8eaee", text2="#b5bac3",
              text3="#7d838e", accent="#6aa9ff", ok="#5fb37e", warn="#e0a43a", err="#e06c6c", button="#2a2d34",
              vp_top="#2a2e36", vp_bottom="#1e2026", mesh="#8fb4d8", revolute="#F2B33D", prismatic="#4F8DF5",
-             none="#8a8f98", axis_x="#e06c6c", axis_y="#6cc58a", axis_z="#6aa9ff", hover="#ffffff")
+             none="#8a8f98", axis_x="#e06c6c", axis_y="#6cc58a", axis_z="#6aa9ff", hover="#ffffff", cube="#525a68")
 LIGHT = Theme("light", bg="#f4f5f7", panel="#ffffff", line="#e2e4e8", text="#1d2027", text2="#4a505b",
               text3="#8a909a", accent="#2f6fdc", ok="#2f9e5d", warn="#c98a1b", err="#cc4b4b", button="#f0f1f4",
               vp_top="#fbfbfc", vp_bottom="#e2e5ea", mesh="#7a9cc0", revolute="#D99A1E", prismatic="#2F6FDC",
-              none="#a3a8b1", axis_x="#d0503f", axis_y="#3f9e5a", axis_z="#2f6fdc", hover="#000000")
+              none="#a3a8b1", axis_x="#d0503f", axis_y="#3f9e5a", axis_z="#2f6fdc", hover="#000000", cube="#c3c9d2")
+CHECK_ICON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "check.svg").replace(os.sep, "/")
 
 _current = DARK
 
@@ -52,6 +55,11 @@ def set_current(theme: Theme) -> None:
 def rgb(hex_color: str) -> tuple[float, float, float]:
     h = hex_color.lstrip("#")
     return tuple(int(h[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
+
+
+def rgba(hex_color: str, alpha: float) -> str:
+    r, g, b = (round(c * 255) for c in rgb(hex_color))
+    return f"rgba({r}, {g}, {b}, {round(alpha * 255)})"
 
 
 def stylesheet(t: Theme) -> str:
@@ -76,11 +84,32 @@ QToolButton {{ background: transparent; border: none; color: {t.text2}; padding:
 QToolButton:hover {{ color: {t.text}; }}
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{ background: {t.button}; color: {t.text}; border: 1px solid {t.line}; border-radius: 4px; padding: 2px 6px; }}
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{ border-color: {t.accent}; }}
-QCheckBox::indicator {{ width: 12px; height: 12px; border: 1px solid {t.text3}; border-radius: 3px; background: {t.button}; }}
-QCheckBox::indicator:checked {{ background: {t.accent}; border-color: {t.accent}; }}
+QCheckBox::indicator {{ width: 14px; height: 14px; border: 1px solid {t.text3}; border-radius: 4px; background: {t.button}; }}
+QCheckBox::indicator:hover {{ border-color: {t.accent}; }}
+QCheckBox::indicator:checked {{ background: {t.accent}; border-color: {t.accent}; image: url({CHECK_ICON}); }}
 QCheckBox::indicator:disabled {{ border-color: {t.line}; }}
+QCheckBox#Mode {{ color: {t.text}; background: {t.button}; border: 1px solid {t.line}; border-radius: 5px; padding: 3px 10px 3px 7px; spacing: 6px; }}
+QCheckBox#Mode:hover {{ border-color: {t.accent}; }}
+QCheckBox#Mode:disabled {{ color: {t.text3}; }}
+QFrame#Chip {{ background: {t.button}; border: 1px solid {t.line}; border-radius: 5px; }}
+QFrame#Chip QLabel {{ background: transparent; }}
+QLabel#ChipKey {{ color: {t.text3}; font-size: 10px; font-weight: 600; letter-spacing: 0.5px; }}
+QLabel#ChipValue {{ color: {t.text}; font-family: Menlo, monospace; font-size: 11px; }}
+QFrame#KeyGuide {{ background: {rgba(t.panel, 0.88)}; border: 1px solid {t.line}; border-radius: 8px; }}
+QFrame#KeyGuide QWidget {{ background: transparent; }}
+QFrame#KeyGuide QLabel {{ color: {t.text2}; font-size: 11px; }}
+QFrame#KeyGuide QLabel#Key {{ color: {t.text}; background: {t.button}; border: 1px solid {t.text3}; border-bottom-width: 2px; border-radius: 4px; padding: 0px 5px; min-width: 10px; font-family: Menlo, monospace; font-size: 10px; font-weight: 600; }}
+QFrame#KeyGuide QLabel#Mouse {{ color: {t.text3}; font-style: italic; }}
 QPlainTextEdit {{ background: {t.bg}; color: {t.text2}; border: 1px solid {t.line}; font-family: Menlo, monospace; font-size: 11px; }}
 QScrollArea {{ border: none; }}
+QScrollBar:vertical {{ background: transparent; width: 8px; margin: 2px 0; }}
+QScrollBar:horizontal {{ background: transparent; height: 8px; margin: 0 2px; }}
+QScrollBar::handle {{ background: {t.line}; border-radius: 3px; margin: 1px; }}
+QScrollBar::handle:hover, QScrollBar::handle:pressed {{ background: {t.text3}; }}
+QScrollBar::handle:vertical {{ min-height: 28px; }}
+QScrollBar::handle:horizontal {{ min-width: 28px; }}
+QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; border: none; background: none; }}
+QScrollBar::add-page, QScrollBar::sub-page {{ background: none; }}
 QSplitter::handle {{ background: {t.line}; }}
 QLabel#Dot {{ border: 2px solid {t.line}; border-radius: 6px; min-width: 8px; max-width: 8px; min-height: 8px; max-height: 8px; }}
 QLabel#Dot[state="running"], QLabel#Dot[state="waiting"] {{ background: {t.accent}; border-color: {t.accent}; }}

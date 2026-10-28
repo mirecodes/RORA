@@ -10,17 +10,18 @@ from functions.math.geometry import normalize, rotmat
 
 AXES = np.eye(3)
 
-# key -> (kind, axis index, sign); shared by Align and Articulate
+# key -> (kind, axis index, sign); shared by Align and Articulate.
+# WASD moves, Q/E turns about Z, arrows tilt: ↑ tips the top toward +X (forward), ← toward -Y (left).
 KEY_BINDINGS = {
     "w": ("move", 0, +1), "s": ("move", 0, -1),
     "d": ("move", 1, +1), "a": ("move", 1, -1),
     "space": ("move", 2, +1), "z": ("move", 2, -1),
-    "n": ("turn", 0, +1), "b": ("turn", 0, -1),
-    "j": ("turn", 1, +1), "h": ("turn", 1, -1),
-    "i": ("turn", 2, +1), "u": ("turn", 2, -1),
+    "left": ("turn", 0, +1), "right": ("turn", 0, -1),
+    "up": ("turn", 1, +1), "down": ("turn", 1, -1),
+    "q": ("turn", 2, +1), "e": ("turn", 2, -1),
 }
 KEY_HINTS = [("W/S", "move ±X"), ("D/A", "move ±Y"), ("Space/Z", "move ±Z"),
-             ("N/B", "rotate ±X"), ("J/H", "rotate ±Y"), ("I/U", "rotate ±Z")]
+             ("←/→", "rotate ±X"), ("↑/↓", "rotate ±Y"), ("Q/E", "rotate ±Z")]
 
 
 def translation(v) -> np.ndarray:

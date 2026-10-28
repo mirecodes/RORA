@@ -8,9 +8,12 @@ vtkmodules.qt.PyQtImpl = "PySide6"  # must be set before importing QVTKRenderWin
 vtkmodules.qt.QVTKRWIBase = "QOpenGLWidget"  # the default QWidget base hangs the event loop on macOS
 
 import vedo  # noqa: E402
-from PySide6.QtWidgets import QVBoxLayout, QWidget  # noqa: E402
+from PIL import Image  # noqa: E402
+from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget  # noqa: E402
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor  # noqa: E402
-from vtkmodules.vtkRenderingCore import vtkPropPicker  # noqa: E402
+from vtkmodules.util.numpy_support import vtk_to_numpy  # noqa: E402
+from vtkmodules.vtkRenderingCore import vtkPropPicker, vtkWindowToImageFilter  # noqa: E402
 
 from functions.gui import theme as th  # noqa: E402
 from functions.gui.gizmo import TransformGizmo  # noqa: E402
@@ -18,9 +21,63 @@ from functions.gui.viewcube import HOME, ViewCube  # noqa: E402
 
 KEY_NAMES = {"Tab": "tab", "ISO_Left_Tab": "tab", "Return": "enter", "KP_Enter": "enter",
              "space": "space", "Escape": "escape"}
-HINTS_PER_ROW = 4
+GUIDE_ROWS = 6        # key guide rows per column
+NAMED_KEYS = {"Space", "Enter", "Tab", "Esc"}
 # VTK's built-in overlay fonts have no glyphs for these; the Qt panel keeps the originals
 OVERLAY_ASCII = str.maketrans({"↔": "<->", "→": "->", "◂": "<", "▸": ">"})
+
+
+def _keys_cell(keys: str) -> QWidget:
+    """'W/S' -> two keycaps; mouse actions ('Drag', 'Left click') stay plain text."""
+    cell = QWidget()
+    row = QHBoxLayout(cell)
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(3)
+    parts = keys.split("/")
+    if not all(len(p) == 1 or p in NAMED_KEYS for p in parts):
+        row.addWidget(QLabel(keys, objectName="Mouse"))
+        return cell
+    for i, p in enumerate(parts):
+        if i:
+            row.addWidget(QLabel("/"))
+        row.addWidget(QLabel(p, objectName="Key", alignment=Qt.AlignmentFlag.AlignCenter))
+    row.addStretch()
+    return cell
+
+
+class KeyGuide(QFrame):
+    """Bottom-left table of a scene's controls, drawn by Qt above the GL view (not part of captures)."""
+
+    def __init__(self, parent):
+        super().__init__(parent, objectName="KeyGuide")
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.grid = QGridLayout(self)
+        self.grid.setContentsMargins(10, 8, 12, 8)
+        self.grid.setHorizontalSpacing(10)
+        self.grid.setVerticalSpacing(4)
+        self.controls = []
+        self.hide()
+
+    def set_controls(self, controls) -> None:
+        if list(controls) == self.controls:
+            return
+        self.controls = list(controls)
+        while self.grid.count():
+            self.grid.takeAt(0).widget().deleteLater()
+        for i, (keys, action) in enumerate(controls):
+            r, c = i % GUIDE_ROWS, 2 * (i // GUIDE_ROWS)
+            self.grid.addWidget(_keys_cell(keys), r, c)
+            self.grid.addWidget(QLabel(action.translate(OVERLAY_ASCII)), r, c + 1)
+            self.grid.setColumnMinimumWidth(c + 1, 96)
+        self.setVisible(bool(controls))
+        self.grid.activate()
+        self.adjustSize()
+        self.place()
+
+    def place(self) -> None:
+        parent = self.parentWidget()
+        self.move(12, parent.height() - self.height() - 12)
+        self.raise_()
 
 
 class _VTKWidget(QVTKRenderWindowInteractor):
@@ -58,6 +115,7 @@ class Viewport(QWidget):
         self.scene = None
         self.actors = []
         self.overlays = []
+        self.guide = KeyGuide(self)
         self._picker = vtkPropPicker()
         self._tags = {}
         for ev, fn in (("LeftButtonPressEvent", self._left_press), ("LeftButtonReleaseEvent", self._left_release),
@@ -160,13 +218,40 @@ class Viewport(QWidget):
             text = (f"{s.title}\n{s.hint}" if s.hint else s.title).translate(OVERLAY_ASCII)
             self.overlays.append(vedo.Text2D(text, pos="top-left", s=0.85, c=t.text, bg=t.panel,
                                              alpha=0.85, font="Arial"))
-        if s is not None and s.controls:
-            items = [f"{k}  {v}" for k, v in s.controls]
-            rows = ["     ".join(items[i:i + HINTS_PER_ROW]) for i in range(0, len(items), HINTS_PER_ROW)]
-            self.overlays.append(vedo.Text2D("\n".join(rows).translate(OVERLAY_ASCII), pos="bottom-left", s=0.75, c=t.text2,
-                                             bg=t.panel, alpha=0.85, font="Arial"))
+        self.guide.set_controls(s.controls if s is not None else [])
         if self.overlays:
             self.plt.add(*self.overlays)
+
+    def resizeEvent(self, event):  # noqa: N802 (Qt API name)
+        super().resizeEvent(event)
+        self.guide.place()
+
+    # --- capture ---
+    def capture(self, path: str) -> None:
+        """Save the current view as a centered square PNG, without the cube, gizmo, or text overlays."""
+        extras = (self.cube.ren, self.gizmo.ren)
+        for ren in extras:
+            ren.DrawOff()
+        if self.overlays:
+            self.plt.remove(*self.overlays)
+        try:
+            grab = vtkWindowToImageFilter()
+            grab.SetInput(self.plt.window)
+            grab.SetInputBufferTypeToRGB()
+            grab.ReadFrontBufferOff()
+            grab.Update()
+            img = grab.GetOutput()
+            w, h, _ = img.GetDimensions()
+            rgb = vtk_to_numpy(img.GetPointData().GetScalars()).reshape(h, w, 3)[::-1]
+        finally:
+            for ren in extras:
+                ren.DrawOn()
+            if self.overlays:
+                self.plt.add(*self.overlays)
+            self.render()
+        s = min(w, h)
+        x, y = (w - s) // 2, (h - s) // 2
+        Image.fromarray(rgb[y:y + s, x:x + s].copy()).save(path)
 
     # --- view ---
     def render(self) -> None:
@@ -206,7 +291,7 @@ if __name__ == "__main__":
     class _DemoScene:
         title = "Viewport demo"
         hint = "Drag gizmo arrows/rings; click the cube; R resets, G toggles the gizmo."
-        controls = [("Drag", "rotate"), ("Wheel", "zoom"), ("R", "reset view"), ("G", "gizmo")]
+        controls = [("Drag", "rotate"), ("Wheel", "zoom"), ("R", "reset view"), ("G", "toggle gizmo")]
         viewport = None
 
         def __init__(self):

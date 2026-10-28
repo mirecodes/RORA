@@ -6,8 +6,12 @@ from functions.gui.manip import (AssemblyTarget, VectorGroupTarget, from_fields,
 from functions.math.geometry import normalize, rotmat
 
 
+OLD_NAMES = {"e": "u", "q": "i", "down": "h", "up": "j", "right": "b", "left": "n"}   # rotation keys rebound
+
+
 def old_key(asm, k, angle, step):
-    """Copy of the deleted transform.key_press_callback (reference behaviour)."""
+    """Copy of the deleted transform.key_press_callback (reference behaviour), addressed by current key names."""
+    k = OLD_NAMES.get(k, k)
     {"u": lambda: asm.rotate_z(-angle), "i": lambda: asm.rotate_z(angle),
      "h": lambda: asm.rotate_y(-angle), "j": lambda: asm.rotate_y(angle),
      "b": lambda: asm.rotate_x(-angle), "n": lambda: asm.rotate_x(angle),
@@ -25,11 +29,11 @@ def test_rotation_keeps_pivot_fixed():
 def test_align_keys_match_old_vedo_assembly():
     asm = vedo.Assembly((vedo.Mesh([[[0, 0, 0], [1, 0, 0], [0, 1, 0]], [[0, 1, 2]]]),))
     target = AssemblyTarget()
-    for key in ["u", "w", "i", "i", "space", "b", "d", "n", "h", "j", "s", "z", "a"]:
+    for key in ["e", "w", "q", "q", "space", "right", "d", "left", "down", "up", "s", "z", "a"]:
         target.apply(key_delta(key, 0.5, 1.0, target.pivot()))
         old_key(asm, key, 1.0, 0.5)
     assert np.allclose(target.matrix, asm.transform.matrix, atol=1e-9)
-    assert key_delta("q", 0.5, 1.0, target.pivot()) is None
+    assert key_delta("x", 0.5, 1.0, target.pivot()) is None
 
 
 def test_set_matrix_and_fields_round_trip():
@@ -48,10 +52,10 @@ def test_vector_group_matches_old_key_handler():
     expected = [dict(v) for v in vectors]
     target = VectorGroupTarget(vectors)
     th = np.deg2rad(1.5)
-    for key in ["w", "i", "i", "space", "n"]:
+    for key in ["w", "q", "q", "space", "left"]:
         target.apply(key_delta(key, 0.1, 1.5, target.pivot()))
         d = {"w": (0.1, 0, 0), "space": (0, 0, 0.1)}.get(key, (0, 0, 0))
-        R = {"i": rotmat([0, 0, 1], th), "n": rotmat([1, 0, 0], th)}.get(key)
+        R = {"q": rotmat([0, 0, 1], th), "left": rotmat([1, 0, 0], th)}.get(key)
         for v in expected:  # old select_joint_vectors.on_key
             v["center"] = (np.asarray(v["center"]) + d).tolist()
             if R is not None:

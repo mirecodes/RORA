@@ -98,6 +98,7 @@ articulate:
     w_ang: 0.5
     cost_max: null
   vector_augment_min_count: 2
+  suggestion_urdf: true       # also write every suggested vector (no human selection) to working/<object>/urdf/
   urdf:                       # passed to utils.urdf.generate_urdf
     urdf_name: object
     density: 1000.0

@@ -13,7 +13,7 @@ from functions.math.patch import cycle_patch
 from functions.math.connection import fuse_connections, unicon_normal, merge_lines, plane_intersections
 from functions.math.axis_estimation import estimate_unicons
 from functions.utils.mesh import append_patches, save_link_meshes
-from functions.utils.urdf import generate_urdf, joints_from_bicons
+from functions.utils.urdf import generate_urdf, joints_from_bicons, suggestions_from_bicons
 from functions.gui.bridge import ui
 from functions.visualize.plots import show_bicons, show_links
 
@@ -379,14 +379,22 @@ def stage_articulate(cfgs):
 
     ui().step("urdf")
     # Generate URDF File (urdf_name / density / mesh_fmt from parameters_cfg.yml)
+    T = urdf_transform(cfgs, states)
     urdf_dir = generate_urdf(
         closed_parts=links,
         joints=joints,
         out_dir=cfgs.urdf_out_dir,
-        transform_matrix=urdf_transform(cfgs, states),
+        transform_matrix=T,
         **artCfgs["urdf"]
     )
     print(f"[info]: the urdf file has been generated in: {urdf_dir}")
+
+    if artCfgs["suggestion_urdf"]:
+        # Every suggested vector, no human selection: links fixed to base, candidates as suggest_* joints
+        suggestions = suggestions_from_bicons(bicons)
+        path = generate_urdf(closed_parts=links, joints=[], out_dir=cfgs.urdf_working_dir,
+                             transform_matrix=T, suggestions=suggestions, **artCfgs["urdf"])
+        print(f"[info]: suggestion urdf ({len(suggestions)} candidates) generated in: {path}")
 
     # Debug checkpoint: the articulated object's link meshes
     show_links(links)

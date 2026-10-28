@@ -1,0 +1,109 @@
+# Object profile for apr_diffuser, saved 2026-10-21 10:38:37 by the RORA GUI.
+# Shared profile at save time: real_object.
+# Loaded after parameters_cfg.yml and the shared profile. `pipeline` (run settings) is not stored here.
+object:
+  object_name: apr_diffuser
+  extension: ply
+  profile: real_object
+  parts:
+    num: 3
+transform:
+  use_auto_alignment: true    # PCA/RANSAC z-up alignment; false = identity
+
+refine:
+  method: pymeshlab           # pymeshlab | point2mesh | pymeshlab_then_point2mesh
+  point2mesh:
+    iterations: 10
+    gpu: -1                   # -1 = CPU
+  pymeshlab:
+    do_flatten_bottom: true
+    steps:
+      cleaning: true
+      reconstruction: true
+      vertex_selection: true
+      decimation: true
+      remeshing: true
+      occlusion_repair: true
+      close_holes: true
+      attribute_transfer: true
+    params:
+      meshing_remove_connected_component_by_diameter:
+        mincomponentdiag: "20%"
+      generate_surface_reconstruction_screened_poisson:
+        depth: 8              # default 10
+        fulldepth: 8
+        preclean: true
+      compute_selection_by_condition_per_vertex:
+        condselect: "(z < -1e-6)"
+      meshing_decimation_quadric_edge_collapse:
+        targetfacenum: 15000
+        preservenormal: false
+      meshing_isotropic_explicit_remeshing:
+        targetlen: "1%"
+        adaptive: true
+      meshing_close_holes:
+        maxholesize: 10000
+      transfer_attributes_per_vertex:
+        sourcemesh: 1
+        targetmesh: 0
+        vertexsampling: false
+        geomtransfer: false
+        normaltransfer: true
+        colortransfer: true
+        upperbound: "5%"
+
+decompose:
+  coacd:                      # passed as-is to coacd.run_coacd
+    threshold: 0.05           # concavity (0.01~1), lower = more parts
+    max_convex_hull: -1       # -1 = unlimited
+    preprocess_mode: auto     # auto | on | off
+    preprocess_resolution: 50 # 20~100
+    resolution: 2000          # Hausdorff sampling (1e3~1e4)
+    mcts_nodes: 20            # 10~40
+    mcts_iterations: 150      # 60~2000
+    mcts_max_depth: 3         # 2~7
+    pca: false
+    merge: true
+    decimate: false
+    max_ch_vertex: 256
+    extrude: false
+    extrude_margin: 0.01
+    apx_mode: ch              # ch | box
+    seed: 0
+
+segment:
+  labeling:                   # passed to math.graph.label_vertices
+    use_signed_dist: true
+    sdf_thresh: 0.0
+
+articulate:
+  allow_unpaired_unicon: true # promote a unicon with no reverse match to a bicon
+  axis_estimation:            # passed to math.axis_estimation.estimate_unicons
+    max_hops: 10
+    method: all               # single_plane | rbf | multi_plane | all
+    C: 1.0
+    gamma: scale
+    balance: None
+    neighbor_threshold: 0.25
+    min_size_to_keep: 0
+    show_none_cycles: false
+  fusion:                     # passed to math.connection.fuse_connections
+    w_pos: 1.0
+    w_ang: 0.5
+    cost_max: null
+  vector_augment_min_count: 2
+  urdf:                       # passed to utils.urdf.generate_urdf
+    urdf_name: object
+    density: 1000.0
+    mesh_fmt: stl
+
+bind:
+  k_neighbors: 3
+  max_dist_rel: 1.0           # drop Gaussians farther than this * mesh diagonal
+  z_cut_rel: -1000.0          # drop Gaussians below this * mesh diagonal
+  verbose: true
+
+visualization:
+  vector_scale:
+    length_factor: 1.0
+    thickness_factor: 1.0

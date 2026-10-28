@@ -114,7 +114,10 @@ class ViewCube:
         main_renderer.AddObserver("StartEvent", self.sync)
 
     def set_theme(self, t) -> None:
-        self.cube.GetCubeProperty().SetColor(*th.rgb(t.button))
+        cube = self.cube.GetCubeProperty()
+        cube.SetColor(*th.rgb(t.cube))
+        cube.SetAmbient(0.55)   # flatter shading keeps the face labels readable from every side
+        cube.SetDiffuse(0.5)
         for prop in (self.cube.GetXPlusFaceProperty(), self.cube.GetXMinusFaceProperty(),
                      self.cube.GetYPlusFaceProperty(), self.cube.GetYMinusFaceProperty(),
                      self.cube.GetZPlusFaceProperty(), self.cube.GetZMinusFaceProperty()):

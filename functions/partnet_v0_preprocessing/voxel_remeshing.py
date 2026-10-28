@@ -117,6 +117,11 @@ def merge_urdf_voxel_ply(urdf_path, joint_cfg, output_path="fused_voxel.ply", vo
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         final_mesh.export(output_path, file_type='ply', encoding='binary')
         print(f"[Info] Saved: {output_path}")
+
+        # Same remeshed mesh as GLB
+        glb_path = os.path.splitext(output_path)[0] + ".glb"
+        final_mesh.export(glb_path)
+        print(f"[Info] Saved: {glb_path}")
         return final_mesh
 
     except Exception as e:

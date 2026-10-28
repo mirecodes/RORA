@@ -1,6 +1,7 @@
 """Main window: header, viewport | side panel, and the wiring between the bridge events, the runner,
 the panel widgets, and the viewport."""
 import copy
+import os
 import sys
 import time
 import traceback
@@ -53,6 +54,18 @@ def _divider() -> QFrame:
     return line
 
 
+def _chip(caption: str) -> tuple[QFrame, QLabel]:
+    """Shaded header field: small caption + value."""
+    chip = QFrame(objectName="Chip")
+    row = QHBoxLayout(chip)
+    row.setContentsMargins(8, 3, 8, 3)
+    row.setSpacing(6)
+    value = QLabel("", objectName="ChipValue")
+    row.addWidget(QLabel(caption.upper(), objectName="ChipKey"))
+    row.addWidget(value)
+    return chip, value
+
+
 class MainWindow(QMainWindow):
     def __init__(self, minimal: bool = False):
         super().__init__()
@@ -84,23 +97,31 @@ class MainWindow(QMainWindow):
         header = QWidget(objectName="Header")
         h = QHBoxLayout(header)
         h.setContentsMargins(12, 6, 12, 6)
+        h.setSpacing(8)
         title = QLabel("RORA", objectName="Title")
-        self.subtitle = QLabel("", objectName="Muted")
+        object_chip, self.object_label = _chip("Object")
+        profile_chip, self.profile_label = _chip("Profile")
+        self.stem_chip, self.stem_label = _chip("Object profile")
         self.run_btn = QPushButton("▶ Run")
         self.run_btn.setProperty("primary", True)
         self.stop_btn = QPushButton("■ Stop")
-        self.minimal_box = QCheckBox("Minimal")
+        self.capture_btn = QPushButton("Capture")
+        self.capture_btn.setToolTip("Save the current view as a square PNG to export/<object>/captures")
+        self.minimal_box = QCheckBox("Minimal", objectName="Mode")
         self.minimal_box.setToolTip("No debug checkpoints, no live viewport while computing, terminal-only log")
         self.elapsed = QLabel("", objectName="Meta")
         self.theme_btn = QToolButton(text="◐", toolTip="Toggle light/dark theme")
         self.run_btn.clicked.connect(self.run_all)
         self.stop_btn.clicked.connect(self.stop)
+        self.capture_btn.clicked.connect(self.capture)
         self.minimal_box.toggled.connect(self._set_minimal)
         self.theme_btn.clicked.connect(self.toggle_theme)
-        for w in (title, self.subtitle):
+        h.addWidget(title)
+        h.addSpacing(8)
+        for w in (object_chip, profile_chip, self.stem_chip):
             h.addWidget(w)
         h.addStretch()
-        for w in (self.run_btn, self.stop_btn, self.minimal_box, self.elapsed, self.theme_btn):
+        for w in (self.capture_btn, self.run_btn, self.stop_btn, self.minimal_box, self.elapsed, self.theme_btn):
             h.addWidget(w)
 
         self.viewport = Viewport()
@@ -153,7 +174,14 @@ class MainWindow(QMainWindow):
         self.states_path = cfgs.json_states_dir
         self.statuses = initial_statuses(read_states(self.states_path))
         self.timeline.reset(self.statuses, params["pipeline"]["stages"])
-        self.subtitle.setText(f"{obj['object_name']} · profile: {obj.get('profile')}" + (f" · {stem}" if stem else ""))
+        self._show_object(obj)
+
+    def _show_object(self, obj: dict) -> None:
+        self.object_label.setText(obj["object_name"])
+        self.object_label.parentWidget().setToolTip(self.make_cfgs().mesh_in_dir)
+        self.profile_label.setText(str(obj.get("profile")))
+        self.stem_label.setText(obj.get("object_profile") or "")
+        self.stem_chip.setVisible(bool(obj.get("object_profile")))
 
     def _snapshot(self) -> None:
         """Hand the worker a private copy; it is read once per stage start (atomic reference swap)."""
@@ -182,8 +210,20 @@ class MainWindow(QMainWindow):
         obj["object_profile"] = stem
         self.editor.after_save(obj, list_object_profiles(obj["object_name"]))
         self._snapshot()
-        self.subtitle.setText(f"{obj['object_name']} · profile: {obj.get('profile')} · {stem}")
+        self._show_object(obj)
         print(f"[info]: saved object profile cfgs/profiles/objects/{stem}.yml")
+
+    def capture(self) -> None:
+        cfgs = self.make_cfgs()
+        out_dir = os.path.join(cfgs.out_dir, "captures")
+        os.makedirs(out_dir, exist_ok=True)
+        path = os.path.join(out_dir, f"{cfgs.object_name}_{time.strftime('%Y%m%d_%H%M%S')}.png")
+        try:
+            self.viewport.capture(path)
+        except Exception as e:  # keep the GUI alive
+            QMessageBox.critical(self, "Capture failed", str(e))
+            return
+        print(f"[info]: saved capture {os.path.relpath(path, cfgs.root_dir)}")
 
     # --- run control ---
     def run_all(self) -> None:

@@ -16,3 +16,4 @@ export/
 __pycache__/
 *.pyc
 .venv/
+evaluation/

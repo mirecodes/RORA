@@ -131,7 +131,7 @@ class CheckpointScene(Scene):
 class AlignScene(Scene):
     title = "Align · Manual adjust"
     hint = "Seat the object on the ground plane (z = 0) with Front along +X."
-    controls = KEY_HINTS + [("G", "gizmo"), ("R", "reset view"), ("Enter", "done")]
+    controls = KEY_HINTS + [("G", "toggle gizmo"), ("R", "reset view"), ("Enter", "done")]
     turn_deg = 1.0
 
     def __init__(self, verts, faces, point_colors=None, cell_colors=None):
@@ -322,7 +322,7 @@ class PartSelectScene(Scene):
 
 class JointSelectScene(Scene):
     hint = "Click arrows: None → Revolute → Prismatic. Keys and gizmo move every vector of this pair."
-    controls = [("Click arrow", "cycle type")] + KEY_HINTS + [("G", "gizmo"), ("R", "reset view"),
+    controls = [("Click arrow", "cycle type")] + KEY_HINTS + [("G", "toggle gizmo"), ("R", "reset view"),
                                                              ("Enter", "next pair / done")]
     turn_deg = 1.5
 
