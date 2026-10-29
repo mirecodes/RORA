@@ -25,6 +25,22 @@ def _apply(T, p) -> np.ndarray:
     return q[:3] / q[3]
 
 
+def urdf_transform(cfgs, states) -> np.ndarray | None:
+    """Inverse of the alignment (aligned -> original frame) if requested and available, else None."""
+    if not cfgs.urdf_use_original_coordinates:
+        print("[info]: Generating outputs in ALIGNED coordinate system.")
+        return None
+    try:
+        # states.transform.matrix maps original -> aligned; meshes/joints here are aligned, so invert it.
+        if hasattr(states, "transform") and hasattr(states.transform, "matrix"):
+            print("[info]: Generating outputs in ORIGINAL coordinate system (reverting alignment).")
+            return np.linalg.inv(np.array(states.transform.matrix))
+        print("[warn]: Transform matrix not found in states. Generating outputs in current (aligned) coordinates.")
+    except Exception as e:
+        print(f"[warn]: Failed to load/invert transform matrix: {e}. Generating outputs in current coordinates.")
+    return None
+
+
 # =============================================================================
 # Joints
 # =============================================================================

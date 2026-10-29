@@ -4,10 +4,10 @@ Builds an articulated **URDF** and **per-part Gaussians** from a mesh (`mesh.ply
 
 ```
 align → refine → decompose → segment → articulate → bind
-align    clean     convex      part        joint       Gaussian
-         mesh      decomp.     grouping +  suggestion  binding
-                               vertex      + selection
-                               labels      + URDF
+align    clean     convex      part        joint       watertight links
+         mesh      decomp.     grouping +  suggestion  + URDF
+                               vertex      + selection + Gaussian
+                               labels                  binding
 ```
 
 ## 1. Install
@@ -68,7 +68,8 @@ profile: real_object        # real_object (real scan) | partnet_object (PartNet 
 | `pipeline.debug_mode` | Pause at intermediate results in the viewport (ignored with `--minimal`). |
 | `refine.method` | `pymeshlab` (default) or `point2mesh`. |
 | `decompose.coacd.threshold` | Lower = finer decomposition. |
-| `articulate.suggestion_urdf` | Also write every suggested joint vector, before human selection, to `working/<object>/urdf/` (evaluation `suggest`). |
+| `bind.close_holes` | Hole closing per link mesh; a link still open becomes the union of its own CoACD parts (`decompose.coacd`). |
+| `bind.suggestion_urdf` | Also write every suggested joint vector, before human selection, to `working/<object>/urdf/` (evaluation `suggest`). |
 
 `cfgs/profiles/<profile>_params_cfg.yml` overrides `parameters_cfg.yml`, only for the keys it lists.
 An object profile saved from the GUI (`object_cfg.yml: object_profile`, stored in `cfgs/profiles/objects/`)
@@ -108,12 +109,12 @@ export/<object_name>/
 │   └── meshes/link_*.stl
 └── gaussian/gaussian_*.ply    # per-part Gaussians
 working/<object_name>/
-├── meshes/                    # refined mesh, fragment_*.ply (decompose), links/link_*.ply (articulate)
-├── urdf/                      # articulate.suggestion_urdf: links fixed to base, one suggest_<a>_<b>_<k> joint per candidate
+├── meshes/                    # refined mesh, fragment_*.ply (decompose), links/link_*.ply (bind, watertight)
+├── urdf/                      # bind.suggestion_urdf: links fixed to base, one suggest_<a>_<b>_<k> joint per candidate
 │   ├── object.urdf
 │   └── meshes/link_*.stl
 └── attributes/
-    ├── states.json            # paths and per-stage results
+    ├── states.json            # paths and per-stage results (articulate.joints/suggestions feed bind)
     └── vert_label.npy         # per-vertex part labels of the refined mesh (segment → articulate, bind)
 ```
 

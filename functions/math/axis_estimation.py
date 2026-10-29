@@ -91,11 +91,12 @@ def train_multi_plane(verts, idx_pos, idx_neg, K: int = 2, max_iter: int = 20, C
         W, b = init_weights(bd)
         assign_pos = assign_neg = [np.array([], dtype=int)] * K
         for _ in range(max_iter):
-            # E-step. convex : every positive in all planes, each negative to its highest-scoring plane.
-            #         concave: each positive to its highest-scoring plane, every negative in all planes.
+            # E-step (raw scores f_j(x) = w_j.x + b_j, no label sign applied).
+            #   convex  (positive iff min_j f_j > 0): each negative to the plane rejecting it most (argmin).
+            #   concave (positive iff max_j f_j > 0): each positive to the plane accepting it most (argmax).
             if bd == "convex":
                 new_pos = [np.arange(len(Xp_s))] * K
-                j_neg = np.argmax(Xn_s @ W.T + b, axis=1)
+                j_neg = np.argmin(Xn_s @ W.T + b, axis=1)
                 new_neg = [np.nonzero(j_neg == j)[0] for j in range(K)]
             else:
                 j_pos = np.argmax(Xp_s @ W.T + b, axis=1)
@@ -171,8 +172,7 @@ def estimate_unicons(verts: np.ndarray,
     # Boundary cycles; cycles within 2 hops count as one boundary
     cycles = part_boundary_cycles(faces, idx_seeds)
     print(f"[debug] Raw cycles: {len(cycles)} (sizes: {[len(c) for c in cycles]})")
-    merged = merge_cycles(adj, cycles, max_hops=2, min_size=min_size_to_keep)
-    cycles, raw_per_cycle = [m[0] for m in merged], [m[1] for m in merged]
+    cycles = merge_cycles(adj, cycles, max_hops=2, min_size=min_size_to_keep)
     print(f"[info] Found {len(cycles)} cycles for part {idx_part}.")
 
     nbrs_per_cycle = [cycle_neighbors(c, adj, vert_label, idx_part, neighbor_threshold) for c in cycles]
@@ -184,7 +184,7 @@ def estimate_unicons(verts: np.ndarray,
         ["single_plane", "rbf", "multi_plane"] if method == "all" else [str(method)]
 
     unicons = []
-    for order, (cycle, raw_cycles, nbrs) in enumerate(zip(cycles, raw_per_cycle, nbrs_per_cycle)):
+    for order, (cycle, nbrs) in enumerate(zip(cycles, nbrs_per_cycle)):
         print(f"[info] Processing cycle {order + 1}/{len(cycles)} (size: {len(cycle)})...")
         # Positives: own part, negatives: other parts, within max_hops of the cycle
         idx_neighbor, dist = k_hop(adj, cycle, max_hops)
@@ -228,7 +228,7 @@ def estimate_unicons(verts: np.ndarray,
         # One unicon per neighbor part
         for nbr in nbrs:
             unicons.append({
-                "src": idx_part, "dst": nbr, "cycle": cycle, "raw_cycles": raw_cycles,
+                "src": idx_part, "dst": nbr, "cycle": cycle,
                 "center": center, "pca_normal": pca_normal, "vert_label": vert_label,
                 "idx_pos": idx_pos, "idx_neg": idx_neg, "idx_neighbor": idx_neighbor, "dist": dist,
                 "single_plane": fits.get("single_plane", {}), "rbf": fits.get("rbf", {}),

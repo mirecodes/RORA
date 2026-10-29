@@ -46,7 +46,7 @@ def test_snapshot_save_and_reload():
         params = config.load_params(object_profile="")
         params["decompose"]["coacd"]["threshold"] = 0.2
         params["decompose"]["coacd"]["preprocess_mode"] = "on"  # PyYAML would read bare `on` as True
-        params["articulate"]["urdf"]["urdf_name"] = ""
+        params["bind"]["urdf"]["urdf_name"] = ""
         obj["parts"]["num"] = 5
         before = {p: _digest(p) for p in _shared_files(d)}
 
@@ -67,7 +67,7 @@ def test_snapshot_save_and_reload():
         for section in params_io.STAGE_SECTIONS:
             assert reloaded[section] == params[section], section
         assert reloaded["decompose"]["coacd"]["preprocess_mode"] == "on"
-        assert reloaded["articulate"]["urdf"]["urdf_name"] == ""
+        assert reloaded["bind"]["urdf"]["urdf_name"] == ""
         assert config.load_object()["parts"]["num"] == 5
 
 

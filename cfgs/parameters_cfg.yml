@@ -93,18 +93,21 @@ articulate:
     neighbor_threshold: 0.25
     min_size_to_keep: 0
     show_none_cycles: false
-  fusion:                     # passed to math.connection.fuse_connections
+  fusion:                     # passed to math.connection.fuse_connections; cost = w_pos * dist / diag + w_ang * (1 - |cos|)
     w_pos: 1.0
     w_ang: 0.5
     cost_max: null
   vector_augment_min_count: 2
+
+bind:
+  close_holes:                # pymeshlab meshing_close_holes per link; still open -> union of the link's CoACD parts (decompose.coacd)
+    maxholesize: 100000
+    selfintersection: false
   suggestion_urdf: true       # also write every suggested vector (no human selection) to working/<object>/urdf/
   urdf:                       # passed to utils.urdf.generate_urdf
     urdf_name: object
     density: 1000.0
     mesh_fmt: stl
-
-bind:
   k_neighbors: 3
   max_dist_rel: 1.0           # drop Gaussians farther than this * mesh diagonal
   z_cut_rel: -1000.0          # drop Gaussians below this * mesh diagonal

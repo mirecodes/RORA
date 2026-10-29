@@ -9,6 +9,9 @@ from scipy.spatial.transform import Rotation as R
 from plyfile import PlyData, PlyElement
 
 from functions.gui.bridge import ui
+from functions.utils.mesh import save_link_meshes
+from functions.utils.urdf import generate_urdf, urdf_transform
+from functions.visualize.plots import show_links
 
 
 # ------------------------------ helpers ---------------------------------------
@@ -172,22 +175,24 @@ def _assign_parts_knn3(mesh, vert_labels, gauss_xyz, k=3, max_dist_rel=0.02):
 
 def stage_bind(cfgs):
     """
-    Minimal bind:
-      - Read mesh + vertex labels
-      - Read Gaussian PLY
-      - Z-cut: drop Gaussians with z < z_cut_rel * diag
-      - Map remaining Gaussians via k=3 KNN (majority)
-      - Drop Gaussians whose nearest vertex is too far
-      - Save per-part PLYs, preserving all original fields/elements
+    All output files are written here, from the states of the earlier stages:
+      - Watertight link meshes (hole closing, CoACD-union fallback) -> working/<object>/meshes/links
+      - URDF from states.articulate.joints -> export/<object>/urdf (+ suggestion URDF -> working/<object>/urdf)
+      - Gaussians: z-cut (z < z_cut_rel * diag), k=3 KNN part assignment, drop too-far ones,
+        per-part PLYs preserving all original fields/elements -> export/<object>/gaussian
     """
-    ui().plan([("load", "Load", True), ("zcut", "Z-cut", True), ("knn", "KNN assignment", True),
-               ("save", "Save", True)])
+    ui().plan([("load", "Load", True), ("links", "Link meshes", True), ("urdf", "URDF", True),
+               ("zcut", "Z-cut", True), ("knn", "KNN assignment", True), ("save", "Save", True)])
     ui().step("load")
     print(f"[Info] Creating output directory: {cfgs.gaussian_out_dir}")
     os.makedirs(cfgs.gaussian_out_dir, exist_ok=True)
 
     states = JsonHandler(cfgs.json_states_dir, auto_save=True)
-    
+    if "articulate" not in states:  # JsonHandler raises KeyError, not AttributeError, so no hasattr
+        raise RuntimeError("[error]: states.articulate not found. Run the articulate stage first.")
+    bind_cfgs = cfgs.params["bind"]
+    T = urdf_transform(cfgs, states)
+
     mesh_path = states.refine.dirs.mesh
     print(f"[Info] Loading mesh from: {mesh_path}")
     
@@ -205,6 +210,36 @@ def stage_bind(cfgs):
         print("[Error] This will cause incorrect binding. Please check if the mesh file matches the labels.")
         # We proceed, but the result will likely be wrong.
 
+    # --- Watertight link meshes ---
+    ui().step("links")
+    print("[Info] Saving watertight link meshes...")
+    link_paths = save_link_meshes(np.asarray(mesh.vertices), np.asarray(mesh.faces), vert_labels.astype(int),
+                                  int(states.segment.parts_num), os.path.join(cfgs.mesh_working_dir, "links"),
+                                  bind_cfgs["close_holes"], cfgs.params["decompose"]["coacd"])
+    states.bind = {}
+    states.bind.dirs = {"links": link_paths}
+    links = {int(k): trimesh.load(p, process=False) for k, p in link_paths.items()}
+
+    # --- URDF (urdf_name / density / mesh_fmt from parameters_cfg.yml) ---
+    ui().step("urdf")
+    if links:
+        urdf_path = generate_urdf(closed_parts=links, joints=list(states.articulate.joints),
+                                  out_dir=cfgs.urdf_out_dir, transform_matrix=T, **bind_cfgs["urdf"])
+        states.bind.dirs.urdf = urdf_path
+        print(f"[Info] URDF generated: {urdf_path}")
+        if bind_cfgs["suggestion_urdf"] and "suggestions" not in states.articulate:
+            print("[Warning] states.articulate.suggestions missing (articulate ran before it was saved); "
+                  "suggestion URDF skipped. Re-run articulate to get it.")
+        elif bind_cfgs["suggestion_urdf"]:
+            # Every suggested vector, no human selection: links fixed to base, candidates as suggest_* joints
+            suggestions = list(states.articulate.suggestions)
+            path = generate_urdf(closed_parts=links, joints=[], out_dir=cfgs.urdf_working_dir,
+                                 transform_matrix=T, suggestions=suggestions, **bind_cfgs["urdf"])
+            print(f"[Info] Suggestion URDF ({len(suggestions)} candidates) generated: {path}")
+        show_links(links)  # debug checkpoint: the articulated object's link meshes
+    else:
+        print("[Error] No link meshes were generated; URDF skipped.")
+
     gaussian_path = states.transform.dirs.gaussian
     print(f"[Info] Reading Gaussian from: {gaussian_path}")
     if not os.path.exists(gaussian_path):
@@ -215,8 +250,6 @@ def stage_bind(cfgs):
     g_rec = g_ply['vertex'].data
     gauss_xyz = _get_positions(g_rec)
     print(f"[Info] Loaded {len(gauss_xyz)} Gaussian points")
-
-    bind_cfgs = cfgs.params["bind"]
 
     # --- Z cut by relative threshold to mesh diagonal ---
     ui().step("zcut")
@@ -260,19 +293,6 @@ def stage_bind(cfgs):
     if len(part_ids) == 0:
         print("[Warning] No valid parts found to save (all points excluded or no labels assigned).")
         
-    # [New] Prepare Transform Matrix if needed
-    transform_matrix = None
-    if cfgs.urdf_use_original_coordinates:
-        try:
-            if hasattr(states, "transform") and hasattr(states.transform, "matrix"):
-                T_aligned = np.array(states.transform.matrix)
-                transform_matrix = np.linalg.inv(T_aligned)
-                print("[Info] Applying INVERSE transform to Gaussians (Reverting to Original Coordinates).")
-            else:
-                print("[Warning] Transform matrix not found. Skipping coordinate reversion.")
-        except Exception as e:
-            print(f"[Error] Failed to prepare transform matrix: {e}")
-
     for c in part_ids:
         idxs = np.nonzero(keep & (assigned == c))[0]
         if idxs.size == 0:
@@ -280,8 +300,7 @@ def stage_bind(cfgs):
         out_path = os.path.join(cfgs.gaussian_out_dir, f"gaussian_{int(c)}.ply")
         print(f"[Info] Saving part {c} to {out_path} with {idxs.size} points")
         try:
-            # Pass transform_matrix to slice function
-            _slice_vertex_in_ply(g_ply, idxs, transform_matrix=transform_matrix).write(out_path)
+            _slice_vertex_in_ply(g_ply, idxs, transform_matrix=T).write(out_path)
             print(f"[Success] Saved {out_path}")
         except Exception as e:
             print(f"[Error] Failed to write {out_path}: {e}")

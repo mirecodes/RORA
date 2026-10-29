@@ -43,9 +43,10 @@ def merge_lines(lines_a, lines_b, cos_min: float = 0.866025) -> list[np.ndarray]
     return merged
 
 
-def fuse_connections(unicons: list[dict], *, w_pos: float = 1.0, w_ang: float = 0.5,
+def fuse_connections(unicons: list[dict], *, scale: float, w_pos: float = 1.0, w_ang: float = 0.5,
                      cost_max: float | None = None) -> list[dict]:
     """Min-cost match (center distance + normal angle) of unicons i->j with unicons j->i per part pair.
+    Center distance is relative to `scale` (mesh bbox diagonal), so the cost and cost_max are scale-free.
     unicons: estimate_unicons outputs ('src', 'dst', 'center', 'pca_normal', ...).
     Returns bicons {'parts': (i, j), 'a', 'b', 'center', 'normal', 'cost'}, sorted by cost."""
     buckets = defaultdict(lambda: {"A": [], "B": []})  # A: small->large part, B: large->small
@@ -65,7 +66,7 @@ def fuse_connections(unicons: list[dict], *, w_pos: float = 1.0, w_ang: float = 
         cb = np.array([b["center"] for b in B], dtype=float)
         na = np.array([unicon_normal(a) for a in A])
         nb = np.array([unicon_normal(b) for b in B])
-        C = w_pos * np.linalg.norm(ca[:, None] - cb[None], axis=2) + w_ang * (1.0 - np.abs(na @ nb.T))
+        C = w_pos * np.linalg.norm(ca[:, None] - cb[None], axis=2) / scale + w_ang * (1.0 - np.abs(na @ nb.T))
         rows, cols = linear_sum_assignment(C)
         print(f"[info] Pair ({i}, {j}): matched {len(rows)} bicons.")
 

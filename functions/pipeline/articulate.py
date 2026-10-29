@@ -1,5 +1,3 @@
-import os
-import trimesh
 from typing import Dict, List, Tuple
 from collections import defaultdict
 
@@ -9,17 +7,15 @@ import pymeshlab
 from json_handler import JsonHandler
 from functions.math.geometry import normalize
 from functions.math.graph import adjacency
-from functions.math.patch import cycle_patch
 from functions.math.connection import fuse_connections, unicon_normal, merge_lines, plane_intersections
 from functions.math.axis_estimation import estimate_unicons
-from functions.utils.mesh import append_patches, save_link_meshes
-from functions.utils.urdf import generate_urdf, joints_from_bicons, suggestions_from_bicons
+from functions.utils.urdf import joints_from_bicons, suggestions_from_bicons
 from functions.gui.bridge import ui
-from functions.visualize.plots import show_bicons, show_links
+from functions.visualize.plots import show_bicons
 
 
 # =============================================================================
-# Joint suggestion helpers (axis estimation, vectors, patches)
+# Joint suggestion helpers (axis estimation, vectors)
 # =============================================================================
 def compute_unicons(verts, faces, parts_num: int, adj, vert_label,
                     visualize_results: bool = False, **axis_kwargs) -> List[dict]:
@@ -81,28 +77,6 @@ def prepare_vectors_for_bicons(bicons: List[dict]) -> None:
                 })
 
     print("[info] Vector preparation finished.")
-
-
-def build_extrapoints_and_patches(unicons: List[dict],
-                                  verts: np.ndarray):
-    """For each ordered raw cycle: dense sampling + triangulated patch."""
-    print("[info] Building extra points and patches...")
-    patch_vertices: Dict[int, List[np.ndarray]] = defaultdict(list)
-    patch_faces: Dict[int, List[np.ndarray]] = defaultdict(list)
-    for unicon in unicons:
-        pid = int(unicon.get('src', 0))
-        if pid <= 0:
-            continue
-        # 'cycle' may be an unordered merged set; the patch needs the ordered raw cycles
-        for raw in unicon.get('raw_cycles', []):
-            if len(raw) < 3:
-                continue
-            P3, F = cycle_patch(verts[np.asarray(raw, dtype=int)], step_rel=0.03, sigma_scale=2.0, k_min=6)
-            if P3.size and F.size:
-                patch_vertices[pid].append(P3.astype(float))
-                patch_faces[pid].append(F.astype(np.int64))
-    print("[info] Patch building finished.")
-    return patch_vertices, patch_faces
 
 
 def append_unpaired_unicons(unicons: List[dict], bicons: List[dict], verts: np.ndarray) -> None:
@@ -268,25 +242,6 @@ def augment_vectors_for_pairs_with_map(bicons: List[dict], min_count: int = 2) -
 
 
 # =============================================================================
-# URDF
-# =============================================================================
-def urdf_transform(cfgs, states) -> np.ndarray | None:
-    """Inverse of the alignment (aligned -> original frame) if requested and available, else None."""
-    if not cfgs.urdf_use_original_coordinates:
-        print("[info]: Generating URDF in ALIGNED coordinate system.")
-        return None
-    try:
-        # states.transform.matrix maps original -> aligned; meshes/joints here are aligned, so invert it.
-        if hasattr(states, "transform") and hasattr(states.transform, "matrix"):
-            print("[info]: Generating URDF in ORIGINAL coordinate system (reverting alignment).")
-            return np.linalg.inv(np.array(states.transform.matrix))
-        print("[warn]: Transform matrix not found in states. Generating URDF in current (aligned) coordinates.")
-    except Exception as e:
-        print(f"[warn]: Failed to load/invert transform matrix: {e}. Generating URDF in current coordinates.")
-    return None
-
-
-# =============================================================================
 # Stage (entry point)
 # =============================================================================
 def stage_articulate(cfgs):
@@ -294,15 +249,14 @@ def stage_articulate(cfgs):
     1) Load refined mesh + vertex labels (segment stage output)
     2) Automatic Joint Suggestion: axis estimation (unicons) → bidirectional fusion (bicons) → vector candidates
     3) Joint selection (UI)
-    4) Link meshes + patch fill, URDF generation
-    5) Persist states (states.articulate.*)
+    4) Persist states.articulate.{joints, suggestions}; the bind stage writes link meshes and URDFs from them
     """
     artCfgs = cfgs.params["articulate"]
 
     print("=" * 60)
     print("[info] Starting stage_articulate...")
     ui().plan([("load", "Load", True), ("unicons", "Unicons", True), ("fusion", "Fusion", True),
-               ("vectors", "Vector selection", True), ("links", "Link meshes", True), ("urdf", "URDF", True)])
+               ("vectors", "Vector selection", True), ("save", "Save", True)])
     ui().step("load")
 
     # load states, refined mesh & vertex labels
@@ -334,7 +288,8 @@ def stage_articulate(cfgs):
 
     ui().step("fusion")
     print("[info] Fusing unicons into bidirectional connections (bicons)...")
-    bicons = fuse_connections(unicons, **artCfgs["fusion"])
+    diag = float(np.linalg.norm(verts.max(axis=0) - verts.min(axis=0)))
+    bicons = fuse_connections(unicons, scale=diag, **artCfgs["fusion"])
 
     # Visualizing the fusion details
     if cfgs.debug_mode:
@@ -357,49 +312,15 @@ def stage_articulate(cfgs):
     print("[info] Vector selection finished.")
     joints = joints_from_bicons(bicons)
 
-    # per-link meshes + patch fill
-    ui().step("links")
-    print("[info] Saving link meshes...")
-    link_dir = os.path.join(cfgs.mesh_working_dir, "links")
-    link_mesh_paths = save_link_meshes(verts, faces, vert_label, parts_num, link_dir)
-    patch_vertices, patch_faces = build_extrapoints_and_patches(unicons, verts)
-    append_patches(link_mesh_paths, patch_vertices, patch_faces)
-    print("[info] Link meshes saved.")
-
-    # persist states
+    # persist: everything the bind stage needs (JSON-safe), so a failure there never reruns this stage
+    ui().step("save")
     print("[info] Persisting states...")
+    suggestions = [{"pair": list(s["pair"]), "origin": s["origin"].tolist(), "n": s["n"].tolist(), "state": s["state"]}
+                   for s in suggestions_from_bicons(bicons)]
     states.articulate = {}
-    states.articulate.dirs = {}
-    states.articulate.dirs.mesh = link_mesh_paths
     states.articulate.joints = joints
-    print("[info] States persisted.")
-
-    links: Dict[int, trimesh.Trimesh] = {int(k): trimesh.load(p, process=False) for k, p in link_mesh_paths.items()}
-    if not links:
-        print("[error]: No link meshes were generated.")
-        return
-
-    ui().step("urdf")
-    # Generate URDF File (urdf_name / density / mesh_fmt from parameters_cfg.yml)
-    T = urdf_transform(cfgs, states)
-    urdf_dir = generate_urdf(
-        closed_parts=links,
-        joints=joints,
-        out_dir=cfgs.urdf_out_dir,
-        transform_matrix=T,
-        **artCfgs["urdf"]
-    )
-    print(f"[info]: the urdf file has been generated in: {urdf_dir}")
-
-    if artCfgs["suggestion_urdf"]:
-        # Every suggested vector, no human selection: links fixed to base, candidates as suggest_* joints
-        suggestions = suggestions_from_bicons(bicons)
-        path = generate_urdf(closed_parts=links, joints=[], out_dir=cfgs.urdf_working_dir,
-                             transform_matrix=T, suggestions=suggestions, **artCfgs["urdf"])
-        print(f"[info]: suggestion urdf ({len(suggestions)} candidates) generated in: {path}")
-
-    # Debug checkpoint: the articulated object's link meshes
-    show_links(links)
+    states.articulate.suggestions = suggestions
+    print(f"[info] States persisted: {len(joints)} joints, {len(suggestions)} suggestions.")
 
     print("[info] stage_articulate finished successfully.")
     print("=" * 60)
