@@ -72,7 +72,7 @@ def stage_segment(cfgs):
     # vertex labels
     ui().step("label")
     print("[info] Classifying vertices...")
-    vert_label = label_vertices(verts, parts, **segCfgs["labeling"]).astype(int)
+    vert_label = label_vertices(verts, faces, parts,**segCfgs["labeling"]).astype(int)
     print("[info] Classification finished.")
 
     if cfgs.debug_mode:

@@ -1,12 +1,13 @@
 import os
+
 import numpy as np
 import pymeshlab
 import trimesh
-from pymeshlab import PercentageValue
 from json_handler import JsonHandler
+from pymeshlab import PercentageValue
 
-from functions.utils.mesh import repair_mesh, flatten_bottom_hole, fill_bottom_hole
 from functions.gui.bridge import ui
+from functions.utils.mesh import fill_bottom_hole, flatten_bottom_hole, repair_mesh
 from functions.visualize.plots import show_meshset
 
 
@@ -183,8 +184,8 @@ def run_pymeshlab_refinement(cfgs, debug_mode: bool = False):
             ms = fill_bottom_hole(ms)
         if debug_mode: show_meshset(ms, "6. After Occlusion Repair")
 
-        # AUX: recovery
-        repair_mesh(ms)
+    # AUX: recovery
+    repair_mesh(ms)
 
     # 6) Close holes
     if refCfgs["steps"].get("close_holes", True):
