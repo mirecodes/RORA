@@ -104,7 +104,7 @@ Hover a stage to **↻ re-run** it or **▶ run from** it; edit parameters first
 
 ```
 export/<object_name>/
-├── timing.json                # same as working/.../timing.json (see below)
+├── timing.yml                 # same as working/.../timing.yml (see below)
 ├── urdf/
 │   ├── object.urdf
 │   └── meshes/link_*.stl
@@ -119,8 +119,8 @@ working/<object_name>/
     └── vert_label.npy         # per-vertex part labels of the refined mesh (segment → articulate, bind)
 ```
 
-Per-stage and per-step timings are printed at the end and saved to `working/<object_name>/attributes/timing.json`
-and `export/<object_name>/timing.json` (each run overwrites both; the dev runs in section 6 keep a copy per run):
+Per-stage and per-step timings are printed at the end and saved to `working/<object_name>/attributes/timing.yml`
+and `export/<object_name>/timing.yml` (each run overwrites both; the dev runs in section 6 keep a copy per run):
 
 | Column | Meaning |
 |---|---|
@@ -253,7 +253,7 @@ bash scripts/dev/batch_run_pipeline.sh status        # check every object's inpu
   export/dev/20261029_143000/
   ├── session.yml                # mode, counts / seed (random), objects in run order
   ├── batch_set_cfg.yml          # the yml as of the last saved object (parts, object profiles)
-  ├── bucket/                    # export/bucket/ at the end of its run: urdf/, gaussian/, timing.json
+  ├── bucket/                    # export/bucket/ at the end of its run: urdf/, gaussian/, timing.yml
   └── faucet/
   working/dev/20261029_143000/
   ├── bucket/                    # working/bucket/: meshes/, urdf/ (suggestion URDF), attributes/

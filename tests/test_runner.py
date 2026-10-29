@@ -1,9 +1,10 @@
-import json
 import os
 import tempfile
 import threading
 import time
 from types import SimpleNamespace
+
+import yaml
 
 from functions.gui import runner as r
 from functions.gui.bridge import UiBridge, ui
@@ -35,11 +36,11 @@ def test_runs_in_order_and_writes_timing():
     assert calls == ["align", "refine"]
     assert ends(events) == {"align": "done", "refine": "done"}
     assert events[-1] == ("run_end", None)
-    with open(os.path.join(tmp, "timing.json"), encoding="utf-8") as f:
-        timing = json.load(f)
+    with open(os.path.join(tmp, "timing.yml"), encoding="utf-8") as f:
+        timing = yaml.safe_load(f)
     assert set(timing["stages"]) == {"align", "refine"} and timing["minimal"] is False
-    with open(os.path.join(tmp, "export", "timing.json"), encoding="utf-8") as f:
-        assert json.load(f) == timing  # the same timing next to the outputs
+    with open(os.path.join(tmp, "export", "timing.yml"), encoding="utf-8") as f:
+        assert yaml.safe_load(f) == timing  # the same timing next to the outputs
 
 
 def test_failure_stops_the_run():

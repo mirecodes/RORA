@@ -6,6 +6,8 @@ import traceback
 from datetime import datetime
 from typing import Callable
 
+import yaml
+
 from functions.gui.bridge import PipelineStopped, set_ui
 
 STAGE_ORDER = ["align", "refine", "decompose", "segment", "articulate", "bind"]
@@ -66,11 +68,15 @@ def stages_from(stage: str, enabled: dict) -> list[str]:
     return [stage] + [s for s in STAGE_ORDER[i + 1:] if enabled.get(s)]
 
 
+def _rounded(x):
+    return {k: _rounded(v) for k, v in x.items()} if isinstance(x, dict) else round(x, 3) if isinstance(x, float) else x
+
+
 def write_timing(attr_dir: str, report: dict, started: str, minimal: bool) -> str:
-    path = os.path.join(attr_dir, "timing.json")
+    path = os.path.join(attr_dir, "timing.yml")
     os.makedirs(attr_dir, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
-        json.dump({"run_started": started, "minimal": minimal, "stages": report}, f, indent=2)
+        yaml.safe_dump({"run_started": started, "minimal": minimal, "stages": _rounded(report)}, f, sort_keys=False)
     return path
 
 

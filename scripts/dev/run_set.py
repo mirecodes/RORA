@@ -127,9 +127,9 @@ def record_snapshot(cat, name, e):
 
 def archive(name, stamp, since):
     """Copy working/<name> and export/<name> to working/<stamp>/<name> and export/<stamp>/<name> (stamp =
-    dev/<date_time>), if the GUI ran the pipeline after `since` (timing.json is written at the end of every run,
+    dev/<date_time>), if the GUI ran the pipeline after `since` (timing.yml is written at the end of every run,
     even a stopped one)."""
-    timing = f"export/{name}/timing.json"
+    timing = f"export/{name}/timing.yml"
     if not os.path.isfile(timing) or os.path.getmtime(timing) < since:
         print(f"[info] {name}: the pipeline did not run; nothing saved")
         return
