@@ -1,5 +1,5 @@
 # Target object. Input is read from data/objects/<object_name>/{mesh,gaussian}.<extension>
-object_name: globe
+object_name: bucket
 extension: ply
 
 parts:
@@ -9,4 +9,4 @@ parts:
 profile: partnet_object    # real_object | partnet_object
 
 # GUI-saved snapshot cfgs/profiles/objects/<stem>.yml, applied after the shared profile (null = none)
-object_profile: 
+object_profile: bucket_20261029_015825

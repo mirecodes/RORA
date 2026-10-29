@@ -104,6 +104,7 @@ Hover a stage to **↻ re-run** it or **▶ run from** it; edit parameters first
 
 ```
 export/<object_name>/
+├── timing.json                # same as working/.../timing.json (see below)
 ├── urdf/
 │   ├── object.urdf
 │   └── meshes/link_*.stl
@@ -118,8 +119,15 @@ working/<object_name>/
     └── vert_label.npy         # per-vertex part labels of the refined mesh (segment → articulate, bind)
 ```
 
-Per-stage timings (compute time excludes time spent waiting for input) are printed at the end and saved
-to `working/<object_name>/attributes/timing.json`.
+Per-stage and per-step timings are printed at the end and saved to `working/<object_name>/attributes/timing.json`
+and `export/<object_name>/timing.json` (each run overwrites both; the dev runs in section 6 keep a copy per run):
+
+| Column | Meaning |
+|---|---|
+| `interact` | the user working in a scene (align, part selection, joint selection) |
+| `wait` | a debug checkpoint open until **Continue** (none with `--minimal` or `debug_mode: false`) |
+| `compute` | `wall - interact - wait` |
+| `wall` | elapsed time |
 
 ### Example: rerun some stages
 
@@ -203,3 +211,57 @@ bash scripts/preprocess_partnet.sh all        # both
    profile: partnet_object   # clean mesh: disables Poisson, floor cut, etc. in refine
    ```
 3. Run `bash scripts/run_pipeline.sh`.
+
+## 6. Dev: batch and random runs
+
+Development options, not part of the normal pipeline. They run the GUI over a list of objects to rebuild a
+test set or to pick objects for a user study. Each list is one yml file that holds, per object, its name,
+parts count, and object profile.
+
+| Mode | Script | Object list | Runs |
+|---|---|---|---|
+| batch | `scripts/dev/batch_run_pipeline.sh` | `cfgs/dev/batch_set_cfg.yml` | the listed objects in order |
+| random | `scripts/dev/random_run_pipeline.sh` | `cfgs/dev/random_set_cfg.yml` | `counts` random objects per category, in shuffled order |
+
+```yaml
+counts: [1, 1, 0]        # random only: 1 from cat1, 1 from cat2, 0 from cat3
+seed: null               # random only: null = new draw each run
+defaults: {extension: ply, profile: partnet_object}
+objects:
+  cat1:
+    globe: {parts: 2, object_profile: null}   # object_profile is filled in by the run
+```
+
+```bash
+source .venv/bin/activate
+bash scripts/dev/batch_run_pipeline.sh               # all objects in order
+bash scripts/dev/batch_run_pipeline.sh cat2          # one category or one object
+bash scripts/dev/random_run_pipeline.sh              # counts / seed from the yml
+bash scripts/dev/random_run_pipeline.sh run 1,1,0 7  # override counts and seed
+bash scripts/dev/batch_run_pipeline.sh status        # check every object's inputs and outputs
+```
+
+- **run** points `cfgs/object_cfg.yml` at each object (name, parts, profile, object profile) and opens the GUI.
+  With several objects it asks first: `Enter` run, `s` skip, `q` quit. `object_cfg.yml` is restored at the end.
+- After each object, also when the run is cut off with `Ctrl-C`, the run saves that object right away:
+  - the object profile you saved in the GUI (and its parts count) is written back to the yml;
+  - `working/<object>/` and `export/<object>/` are copied to `working/dev/<date_time>/<object>/` and
+    `export/dev/<date_time>/<object>/`, one `<date_time>` per script run. Objects whose pipeline never ran in the
+    GUI are not copied.
+
+  ```
+  export/dev/20261029_143000/
+  ├── session.yml                # mode, counts / seed (random), objects in run order
+  ├── batch_set_cfg.yml          # the yml as of the last saved object (parts, object profiles)
+  ├── bucket/                    # export/bucket/ at the end of its run: urdf/, gaussian/, timing.json
+  └── faucet/
+  working/dev/20261029_143000/
+  ├── bucket/                    # working/bucket/: meshes/, urdf/ (suggestion URDF), attributes/
+  └── faucet/
+  ```
+- **random** prints the drawn objects and the seed (`counts 1,1,0 seed 7: cat1/globe, cat2/faucet`);
+  `run 1,1,0 7` repeats that draw, e.g. to reproduce what a study participant saw.
+- **status** prints one line per object: input files, object profile, URDF (parts / moving joints, date),
+  per-part Gaussians, and the suggestion URDF. URDF and Gaussian counts must match `parts`. Exits 1 if any object
+  is incomplete. It reads the live `export/<object>/` and `working/<object>/`, not a `dev/<date_time>/` copy.
+  Check the dates to tell a new run from an old export.

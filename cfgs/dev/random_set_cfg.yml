@@ -1,0 +1,30 @@
+# Dev: object pool for scripts/dev/random_run_pipeline.sh (e.g. user studies).
+# counts: objects drawn per category, in the order listed under `objects` (CLI `run 1,1,0` overrides).
+# seed: null draws a new set each run; the seed used is printed, so a draw can be repeated (CLI `run 1,1,0 <seed>`).
+# parts / object_profile: as in batch_set_cfg.yml.
+counts: [1, 1, 0]
+seed: null
+defaults:
+  extension: ply
+  profile: partnet_object
+
+objects:
+  cat1:
+    bucket: {parts: 2, object_profile: null}
+    fan: {parts: 2, object_profile: null}
+    globe: {parts: 2, object_profile: null}
+    microwave: {parts: 2, object_profile: null}
+    trashcan: {parts: 2, object_profile: null}
+    usb: {parts: 2, object_profile: null}
+  cat2:
+    box: {parts: 5, object_profile: null}
+    faucet: {parts: 4, object_profile: null}
+    # folding_chair: {parts: 3, object_profile: null}
+    refrigerator: {parts: 3, object_profile: null}
+    toaster: {parts: 3, object_profile: null}
+    # toilet: {parts: 4, object_profile: null}    # the archived ours/ run used 4
+  cat3:
+    dispenser: {parts: 4, object_profile: null}
+    lamp: {parts: 4, object_profile: null}
+    safe: {parts: 3, object_profile: null}
+    stapler: {parts: 3, object_profile: null}

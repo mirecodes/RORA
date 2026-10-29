@@ -19,7 +19,7 @@ def make_runner(run_stage, debug_mode=False, minimal=False, on_event=None):
             on_event(kind, payload)
 
     bridge = UiBridge(post, minimal=minimal)
-    cfgs = SimpleNamespace(debug_mode=debug_mode, json_attr_dir=tmp)
+    cfgs = SimpleNamespace(debug_mode=debug_mode, json_attr_dir=tmp, out_dir=os.path.join(tmp, "export"))
     return r.PipelineRunner(bridge, lambda: cfgs, run_stage), bridge, events, tmp
 
 
@@ -38,6 +38,8 @@ def test_runs_in_order_and_writes_timing():
     with open(os.path.join(tmp, "timing.json"), encoding="utf-8") as f:
         timing = json.load(f)
     assert set(timing["stages"]) == {"align", "refine"} and timing["minimal"] is False
+    with open(os.path.join(tmp, "export", "timing.json"), encoding="utf-8") as f:
+        assert json.load(f) == timing  # the same timing next to the outputs
 
 
 def test_failure_stops_the_run():

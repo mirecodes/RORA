@@ -4,7 +4,8 @@
 
 # transform:
 #   use_auto_alignment: false 
-
+transform:
+  use_auto_alignment: false    # PCA/RANSAC z-up alignment; false = identity
 
 refine:
   pymeshlab:

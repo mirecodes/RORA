@@ -12,20 +12,22 @@ class FakeClock:
         return self.t
 
 
-def test_timer_compute_excludes_wait():
+def test_timer_compute_excludes_interact_and_wait():
     clock = FakeClock()
     timer = StageTimer(clock)
     timer.begin_stage("refine")
     assert timer.begin_step("a") is None
     clock.t += 2.0
     assert timer.begin_step("b") == ("a", 2.0)
-    clock.t += 6.0
-    timer.add_wait(5.0)
+    clock.t += 9.0
+    timer.add_blocked(5.0, "interact")
+    timer.add_blocked(3.0, "wait")
     assert timer.end_stage() == ("b", 1.0)
     r = timer.report()["refine"]
-    assert (r["wall"], r["wait"], r["compute"]) == (8.0, 5.0, 3.0)
-    assert r["steps"] == {"a": {"compute": 2.0, "wait": 0.0}, "b": {"compute": 1.0, "wait": 5.0}}
-    assert "refine" in timer.summary()
+    assert (r["wall"], r["interact"], r["wait"], r["compute"]) == (11.0, 5.0, 3.0, 3.0)
+    assert r["steps"] == {"a": {"compute": 2.0, "interact": 0.0, "wait": 0.0, "wall": 2.0},
+                          "b": {"compute": 1.0, "interact": 5.0, "wait": 3.0, "wall": 9.0}}
+    assert "  b" in timer.summary()  # steps are listed under their stage
 
 
 def test_repeated_step_accumulates_and_stage_rerun_replaces():
@@ -54,7 +56,7 @@ def test_events_and_interact_result():
     assert kinds == ["stage_begin", "plan", "step", "scene", "stage_end"]
     end = events[-1][1]
     assert end["name"] == "segment" and end["status"] == "done" and end["closed"][0] == "load"
-    assert end["report"]["wait"] > 0.0
+    assert end["report"]["interact"] > 0.0 and end["report"]["wait"] == 0.0
 
 
 def test_stop_unblocks_waiting_worker():
@@ -98,6 +100,8 @@ def test_checkpoint_is_noop_unless_debug():
     threading.Timer(0.05, b.resolve).start()
     b.checkpoint("title", lambda: [])
     assert "checkpoint" in events
+    r = b.timer.report()["refine"]
+    assert r["wait"] > 0.0 and r["interact"] == 0.0  # checkpoint time is wait, not interaction
 
 
 def test_default_ui_is_null_bridge():

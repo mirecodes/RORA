@@ -123,5 +123,6 @@ class PipelineRunner:
         finally:
             if cfgs is not None and b.timer.stages:
                 print(b.timer.summary())
-                write_timing(cfgs.json_attr_dir, b.timer.report(), started, b.minimal)
+                for d in (cfgs.json_attr_dir, cfgs.out_dir):  # working (pipeline state) and export (outputs)
+                    write_timing(d, b.timer.report(), started, b.minimal)
             b.post("run_end", None)

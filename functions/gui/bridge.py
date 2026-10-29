@@ -13,7 +13,8 @@ class PipelineStopped(Exception):
 
 
 class StageTimer:
-    """Per-stage and per-step wall time and wait time (blocked on user input). compute = wall - wait."""
+    """Per-stage and per-step wall time and blocked time: interact (the user working in a scene) and wait
+    (a debug checkpoint until Continue). compute = wall - interact - wait."""
 
     def __init__(self, clock: Callable[[], float] = time.perf_counter):
         self.clock = clock
@@ -28,15 +29,19 @@ class StageTimer:
     def begin_stage(self, name: str) -> None:
         self.end_stage()
         self._stage = name
-        self.stages[name] = {"wall": 0.0, "wait": 0.0, "steps": {}}
+        self.stages[name] = {"wall": 0.0, "interact": 0.0, "wait": 0.0, "steps": {}}
         self._t_stage = self.clock()
+
+    @staticmethod
+    def _compute(t: dict) -> float:
+        return t["wall"] - t["interact"] - t["wait"]
 
     def _close_step(self):
         if self._step is None:
             return None
         step = self.stages[self._stage]["steps"][self._step]
         step["wall"] += self.clock() - self._t_step
-        closed = (self._step, step["wall"] - step["wait"])
+        closed = (self._step, self._compute(step))
         self._step = None
         return closed
 
@@ -47,16 +52,17 @@ class StageTimer:
         closed = self._close_step()
         self._step = key
         self._t_step = self.clock()
-        self.stages[self._stage]["steps"].setdefault(key, {"wall": 0.0, "wait": 0.0})
+        self.stages[self._stage]["steps"].setdefault(key, {"wall": 0.0, "interact": 0.0, "wait": 0.0})
         return closed
 
-    def add_wait(self, seconds: float) -> None:
+    def add_blocked(self, seconds: float, kind: str) -> None:
+        """Add `seconds` blocked on the GUI to `kind` ('interact' or 'wait') of the current stage and step."""
         if self._stage is None:
             return
         stage = self.stages[self._stage]
-        stage["wait"] += seconds
+        stage[kind] += seconds
         if self._step is not None:
-            stage["steps"][self._step]["wait"] += seconds
+            stage["steps"][self._step][kind] += seconds
 
     def end_stage(self):
         """Close the stage; return its last step as (key, compute seconds) or None."""
@@ -68,19 +74,24 @@ class StageTimer:
         return closed
 
     def report(self) -> dict:
-        return {name: {"compute": s["wall"] - s["wait"], "wait": s["wait"], "wall": s["wall"],
-                       "steps": {k: {"compute": v["wall"] - v["wait"], "wait": v["wait"]}
-                                 for k, v in s["steps"].items()}}
+        def row(t):
+            return {"compute": self._compute(t), "interact": t["interact"], "wait": t["wait"], "wall": t["wall"]}
+        return {name: {**row(s), "steps": {k: row(v) for k, v in s["steps"].items()}}
                 for name, s in self.stages.items()}
 
     def summary(self) -> str:
+        """Stage table with each stage's steps indented below it."""
+        cols = ("compute", "interact", "wait", "wall")
         rows = self.report()
-        lines = ["=" * 44, f"{'Pipeline timing (seconds)':^44}", "=" * 44,
-                 f"{'stage':<14}{'compute':>10}{'wait':>10}{'wall':>10}"]
+        fmt = lambda label, r: f"{label:<22}" + "".join(f"{r[c]:>10.2f}" for c in cols)
+        w = 22 + 10 * len(cols)
+        lines = ["=" * w, f"{'Pipeline timing (seconds)':^{w}}", "=" * w,
+                 f"{'stage / step':<22}" + "".join(f"{c:>10}" for c in cols)]
         for name, r in rows.items():
-            lines.append(f"{name:<14}{r['compute']:>10.2f}{r['wait']:>10.2f}{r['wall']:>10.2f}")
-        total = [sum(r[k] for r in rows.values()) for k in ("compute", "wait", "wall")]
-        lines += ["-" * 44, f"{'total':<14}{total[0]:>10.2f}{total[1]:>10.2f}{total[2]:>10.2f}", "=" * 44]
+            lines.append(fmt(name, r))
+            lines += [fmt(f"  {k}", v) for k, v in r["steps"].items()]
+        total = {c: sum(r[c] for r in rows.values()) for c in cols}
+        lines += ["-" * w, fmt("total", total), "=" * w]
         return "\n".join(lines)
 
 
@@ -157,7 +168,7 @@ class UiBridge:
         t0 = self.timer.clock()
         self.post(kind, payload)
         self._done.wait()
-        self.timer.add_wait(self.timer.clock() - t0)
+        self.timer.add_blocked(self.timer.clock() - t0, "interact" if kind == "scene" else "wait")
         self.check_stop()
         if self._error is not None:
             raise RuntimeError(f"Scene failed on the GUI thread:\n{self._error}")
