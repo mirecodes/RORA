@@ -14,15 +14,17 @@ from datetime import datetime
 import yaml
 
 from functions.gui.params_io import _dump_atomic, _load_rt
+from functions.gui.runner import STAGE_ORDER
 from functions.utils import config
 
 OBJ_CFG = os.path.join(config.CFG_DIR, "object_cfg.yml")
+PARAMS_CFG = os.path.join(config.CFG_DIR, "parameters_cfg.yml")
 MANIFEST = ""  # cfgs/dev/<mode>_set_cfg.yml, set by main()
 
 
 def entries(doc, which="all"):
     for cat, objs in doc["objects"].items():
-        for name, e in objs.items():
+        for name, e in (objs or {}).items():  # an emptied category (all commented out) loads as None
             if which in ("all", cat, name):
                 yield cat, name, {**doc["defaults"], **e}
 
@@ -139,19 +141,48 @@ def archive(name, stamp, since):
     print(f"[info] {name}: saved to working/{stamp}/{name}/ and export/{stamp}/{name}/")
 
 
+def restore_working(name, source):
+    """Replace working/<name> with the archived working/<source>/<name>, so the stages before `start_stage`
+    reuse that run's results (states.json, meshes) instead of recomputing them."""
+    src = os.path.join("working", source, name)
+    if not os.path.isdir(src):
+        sys.exit(f"[error] {name}: {src}/ not found")
+    shutil.rmtree(os.path.join("working", name), ignore_errors=True)
+    shutil.copytree(src, os.path.join("working", name))
+    print(f"[info] {name}: working/{name}/ restored from {src}/")
+
+
+def start_from(stage):
+    """Turn off the parameters_cfg.yml stage switches before `stage`, so the GUI's Run starts there."""
+    if stage not in STAGE_ORDER:
+        sys.exit(f"[error] start_stage '{stage}' is not one of {', '.join(STAGE_ORDER)}")
+    doc = _load_rt(PARAMS_CFG)
+    for s in STAGE_ORDER:
+        doc["pipeline"]["stages"][s] = STAGE_ORDER.index(s) >= STAGE_ORDER.index(stage)
+    _dump_atomic(doc, PARAMS_CFG)
+    print(f"[info] runs start at {stage}; earlier stages are reused from each object's source\n")
+
+
 def run(mode, targets, info):
     """Point object_cfg.yml at each object and open the GUI. After each object (also on Ctrl-C) record the
-    saved snapshot and archive its outputs under <date_time>/; object_cfg.yml is restored at the end."""
+    saved snapshot and archive its outputs under <date_time>/. With `start_stage` in the set cfg, the earlier
+    stages are switched off and working/<object> is restored from its `source` first. object_cfg.yml and
+    parameters_cfg.yml are restored at the end."""
     if not targets:
         sys.exit("[error] nothing selected")
+    start = _load_rt(MANIFEST).get("start_stage")
     stamp = os.path.join("dev", datetime.now().strftime("%Y%m%d_%H%M%S"))  # -> working/dev/<date_time>/, export/dev/...
     os.makedirs(os.path.join("export", stamp), exist_ok=True)
     with open(os.path.join("export", stamp, "session.yml"), "w", encoding="utf-8") as f:
         yaml.safe_dump({"mode": mode, **info, "objects": [f"{c}/{n}" for c, n, _ in targets]}, f, sort_keys=False)
     print(f"[info] session {stamp}: outputs are saved to working/{stamp}/ and export/{stamp}/\n")
-    with open(OBJ_CFG, encoding="utf-8") as f:
-        original = f.read()
+    originals = {}
+    for path in (OBJ_CFG, PARAMS_CFG):
+        with open(path, encoding="utf-8") as f:
+            originals[path] = f.read()
     try:
+        if start:
+            start_from(start)
         for cat, name, e in targets:
             print(line(cat, name, e)[0])
             if len(targets) > 1:
@@ -160,6 +191,8 @@ def run(mode, targets, info):
                     break
                 if ans == "s":
                     continue
+            if start and e.get("source"):
+                restore_working(name, e["source"])
             doc = _load_rt(OBJ_CFG)
             doc["object_name"], doc["extension"], doc["profile"] = name, e["extension"], e["profile"]
             doc["parts"]["num"], doc["object_profile"] = e["parts"], e["object_profile"]
@@ -173,8 +206,9 @@ def run(mode, targets, info):
             e = next(entries(_load_rt(MANIFEST), name))[2]
             print(line(cat, name, e)[0] + "\n")
     finally:
-        with open(OBJ_CFG, "w", encoding="utf-8") as f:
-            f.write(original)
+        for path, text in originals.items():
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
 
 
 USAGE = {"batch": "batch_run_pipeline.sh [run [object|category]] | status [object|category]",

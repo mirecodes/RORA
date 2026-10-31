@@ -215,7 +215,8 @@ def stage_bind(cfgs):
     print("[Info] Saving watertight link meshes...")
     link_paths = save_link_meshes(np.asarray(mesh.vertices), np.asarray(mesh.faces), vert_labels.astype(int),
                                   int(states.segment.parts_num), os.path.join(cfgs.mesh_working_dir, "links"),
-                                  bind_cfgs["close_holes"], cfgs.params["decompose"]["coacd"])
+                                  bind_cfgs["close_holes"],
+                                  states.segment.dirs.fragments if "fragments" in states.segment.dirs else None)
     states.bind = {}
     states.bind.dirs = {"links": link_paths}
     links = {int(k): trimesh.load(p, process=False) for k, p in link_paths.items()}

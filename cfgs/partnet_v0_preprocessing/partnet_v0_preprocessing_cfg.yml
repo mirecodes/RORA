@@ -6,16 +6,18 @@
 #           data/objects/<name>/mesh_fused.ply  (merge_manifold.py)
 
 # Objects to process in this run (must be keys of `objects`)
-targets: [microwave, bucket, trashcan, fan, globe, usb, toilet, faucet, folding_chair, box, refrigerator, toaster, lamp, dispenser, safe, stapler]
+targets: [toilet]
+# targets: [microwave, bucket, trashcan, fan, globe, usb, toilet, faucet, folding_chair, box, refrigerator, toaster, lamp, dispenser, safe, stapler]
 # targets: [toilet, faucet, folding_chair, box, refrigerator, toaster, lamp, dispenser, safe, stapler]
 
-# voxel_remeshing.py
+# voxel_remeshing.py (defaults; override per object with `voxel: {pitch: ...}`)
 voxel:
   pitch: 0.02           # voxel size in meters
   rotation_deg: 0       # rotation around Z before voxelizing (e.g. 90, 180, 270)
 
 # joint_offset: {joint name: value} applied before merging. Omit = rest pose.
-# voxel_remeshing converts values deg -> rad; merge_manifold passes them as-is.
+# voxel_remeshing: revolute values in deg (-> rad), prismatic values in meters.
+# merge_manifold passes them as-is.
 objects:
   # Category 1: Simple Objects
   microwave:
@@ -25,12 +27,14 @@ objects:
   trashcan:
   fan:
   globe:
+    voxel: {pitch: 0.01}
   usb:
     joint_offset: {joint_0: -0.132}
 
   # Category 2: Complex Objects
   toilet:
     joint_offset: {joint_0: 0, joint_1: 60, joint_2: 30, joint_3: 0}
+    voxel: {pitch: 0.01}
   faucet:
     joint_offset: {joint_3: 180}
   folding_chair:
@@ -41,7 +45,9 @@ objects:
 
   # Category 3: Chained Objects
   lamp:
+    voxel: {pitch: 0.01}
   dispenser:
   safe:
+    voxel: {pitch: 0.01}
   stapler:
     joint_offset: {joint_0: 45, joint_1: 90}

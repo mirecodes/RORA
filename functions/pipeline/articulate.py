@@ -38,10 +38,14 @@ def prepare_vectors_for_bicons(bicons: List[dict]) -> None:
         # Use the bicon normal computed in fuse_connections directly
         n_plane = np.asarray(bicon["normal"], dtype=float)
 
-        A = bicon['a']['single_plane']; B = bicon['b']['single_plane']
-        dA = float(A['plane'][0][1]) if A.get('plane') and len(A['plane']) > 0 else 0.0
-        dB = float(B['plane'][0][1]) if B.get('plane') and len(B['plane']) > 0 else 0.0
-        d_plane = 0.5 * (dA + dB)
+        # Plane offsets follow their normal's sign, so align each (n, d) to n_plane before averaging:
+        # antiparallel unicon planes (the usual i->j vs j->i case) would otherwise cancel d to ~0.
+        d_aligned = []
+        for side in ('a', 'b'):
+            plane = bicon[side]['single_plane'].get('plane')
+            if plane:
+                d_aligned.append(float(plane[0][1]) * (1.0 if np.dot(plane[0][0], n_plane) >= 0.0 else -1.0))
+        d_plane = float(np.mean(d_aligned)) if d_aligned else 0.0
 
         # 1. Add the main single-plane normal vector candidate (as list)
         bicon['vectors'] = [{

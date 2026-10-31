@@ -6,22 +6,22 @@ defaults:
   profile: partnet_object
 
 objects:
-  cat1:
+  cat1: null
     bucket: {parts: 2, object_profile: bucket_20261029_015825}
-    fan: {parts: 2, object_profile: null}
-    globe: {parts: 2, object_profile: null}
-    microwave: {parts: 2, object_profile: null}
-    trashcan: {parts: 2, object_profile: null}
-    usb: {parts: 2, object_profile: null}
-  cat2:
-    box: {parts: 5, object_profile: null}
-    faucet: {parts: 4, object_profile: null}
+    fan: {parts: 2, object_profile: fan_20261029_022019}
+    globe: {parts: 2, object_profile: globe_20261029_023152}
+    microwave: {parts: 2, object_profile: microwave_20261029_023442}
+    trashcan: {parts: 2, object_profile: trashcan_20261029_023658}
+    usb: {parts: 2, object_profile: usb_20261029_024902}
+  cat2: null
+    box: {parts: 5, object_profile: box_20261029_025735}
+    faucet: {parts: 4, object_profile: faucet_20261029_025923}
     folding_chair: {parts: 3, object_profile: null}
-    refrigerator: {parts: 3, object_profile: null}
-    toaster: {parts: 3, object_profile: null}
-    toilet: {parts: 4, object_profile: null}    # the archived ours/ run used 4
+    refrigerator: {parts: 3, object_profile: refrigerator_20261029_031538}
+    toaster: {parts: 3, object_profile: toaster_20261029_032207}
+    toilet: {parts: 4, object_profile: toilet_20261029_034243} # the archived ours/ run used 4
   cat3:
-    dispenser: {parts: 4, object_profile: null}
+    dispenser: {parts: 4, object_profile: dispenser_20261029_040319}
     lamp: {parts: 4, object_profile: null}
-    safe: {parts: 3, object_profile: null}
-    stapler: {parts: 3, object_profile: null}
+    safe: {parts: 3, object_profile: safe_20261029_042525}
+    stapler: {parts: 3, object_profile: stapler_20261029_042732}

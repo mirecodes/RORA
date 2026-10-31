@@ -100,7 +100,7 @@ articulate:
   vector_augment_min_count: 2
 
 bind:
-  close_holes:                # pymeshlab meshing_close_holes per link; still open -> union of the link's CoACD parts (decompose.coacd)
+  close_holes:                # pymeshlab meshing_close_holes per link; still open -> union of the part's decompose-stage CoACD fragments
     maxholesize: 100000
     selfintersection: false
   suggestion_urdf: true       # also write every suggested vector (no human selection) to working/<object>/urdf/

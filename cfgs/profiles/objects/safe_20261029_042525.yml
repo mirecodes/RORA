@@ -1,14 +1,14 @@
-# Object profile for apr_diffuser, saved 2026-10-21 10:38:37 by the RORA GUI.
-# Shared profile at save time: real_object.
+# Object profile for safe, saved 2026-10-29 04:25:25 by the RORA GUI.
+# Shared profile at save time: partnet_object.
 # Loaded after parameters_cfg.yml and the shared profile. `pipeline` (run settings) is not stored here.
 object:
-  object_name: apr_diffuser
+  object_name: safe
   extension: ply
-  profile: real_object
+  profile: partnet_object
   parts:
     num: 3
 transform:
-  use_auto_alignment: true    # PCA/RANSAC z-up alignment; false = identity
+  use_auto_alignment: false   # PCA/RANSAC z-up alignment; false = identity
 
 refine:
   method: pymeshlab           # pymeshlab | point2mesh | pymeshlab_then_point2mesh
@@ -16,15 +16,15 @@ refine:
     iterations: 10
     gpu: -1                   # -1 = CPU
   pymeshlab:
-    do_flatten_bottom: true
+    do_flatten_bottom: false
     steps:
       cleaning: true
-      reconstruction: true
-      vertex_selection: true
+      reconstruction: false
+      vertex_selection: false
       decimation: true
       remeshing: true
-      occlusion_repair: true
-      close_holes: true
+      occlusion_repair: false
+      close_holes: false
       attribute_transfer: true
     params:
       meshing_remove_connected_component_by_diameter:
@@ -87,13 +87,17 @@ articulate:
     neighbor_threshold: 0.25
     min_size_to_keep: 0
     show_none_cycles: false
-  fusion:                     # passed to math.connection.fuse_connections
+  fusion:                     # passed to math.connection.fuse_connections; cost = w_pos * dist / diag + w_ang * (1 - |cos|)
     w_pos: 1.0
     w_ang: 0.5
     cost_max: null
   vector_augment_min_count: 2
 
 bind:
+  close_holes:                # pymeshlab meshing_close_holes per link; still open -> union of the part's decompose-stage CoACD fragments
+    maxholesize: 100000
+    selfintersection: false
+  suggestion_urdf: true       # also write every suggested vector (no human selection) to working/<object>/urdf/
   urdf:                       # passed to utils.urdf.generate_urdf
     urdf_name: object
     density: 1000.0

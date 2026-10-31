@@ -50,20 +50,16 @@ def stage_segment(cfgs):
     from functions.gui.scenes import PartSelectScene  # GUI-only import keeps this module importable headless
     owner = ui().interact(PartSelectScene([(f.vertices, f.faces) for f in fragments], verts, faces, parts_num))
     parts = group_fragments(fragments, owner, parts_num)
+    part_paths = group_fragments(list(states.decompose.dirs.mesh), owner, parts_num)  # bind reuses these hulls
     print("[info] Part selection finished.")
 
     # --- Compact parts by removing empty ones (keeping index 0) ---
-    if len(parts) > 1:
-        new_parts = [parts[0]]
-        for p in parts[1:]:
-            if p:
-                new_parts.append(p)
-
-        if len(new_parts) != len(parts):
-            print(f"[info] Removed {len(parts) - len(new_parts)} empty parts.")
-            parts = new_parts
-            parts_num = len(parts) - 1
-            print(f"[info] Updated parts_num: {parts_num}")
+    keep = [0] + [k for k in range(1, len(parts)) if parts[k]]
+    if len(keep) != len(parts):
+        print(f"[info] Removed {len(parts) - len(keep)} empty parts.")
+        parts, part_paths = [parts[k] for k in keep], [part_paths[k] for k in keep]
+        parts_num = len(parts) - 1
+        print(f"[info] Updated parts_num: {parts_num}")
     # -------------------------------------------------------------------
 
     if not any(parts) and parts_num > 0:
@@ -85,7 +81,8 @@ def stage_segment(cfgs):
     np.save(vert_label_path, vert_label)
     states.segment = {}
     states.segment.parts_num = parts_num
-    states.segment.dirs = {"vert_label": vert_label_path}
+    states.segment.dirs = {"vert_label": vert_label_path,
+                           "fragments": {str(k): list(part_paths[k]) for k in range(1, parts_num + 1)}}
     print(f"[info] Vertex labels saved: {vert_label_path}")
 
     print("[info] stage_segment finished successfully.")
