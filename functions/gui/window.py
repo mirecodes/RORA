@@ -3,15 +3,20 @@ the panel widgets, and the viewport."""
 import copy
 import os
 import sys
+import threading
 import time
 import traceback
+from datetime import datetime
 
-from PySide6.QtCore import QObject, QTimer, Signal
-from PySide6.QtWidgets import (QApplication, QCheckBox, QFrame, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
+import yaml
+from PySide6.QtCore import QEvent, QObject, QTimer, Signal
+from PySide6.QtGui import QKeySequence
+from PySide6.QtWidgets import (QAbstractButton, QApplication, QCheckBox, QFrame, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
                                QPushButton, QSplitter, QToolButton, QVBoxLayout, QWidget)
 
+from functions.gui import study as st
 from functions.gui import theme as th
-from functions.gui.bridge import UiBridge
+from functions.gui.bridge import PipelineStopped, UiBridge, set_ui
 from functions.gui.panel import InteractionHost, LogView, ParamEditor, Timeline
 from functions.gui.params_io import list_object_profiles, load_comments, resolve_object_edit, save_object_profile
 from functions.gui.runner import (STAGE_LABELS, STAGE_ORDER, PipelineRunner, first_blocked, initial_statuses,
@@ -48,6 +53,33 @@ class TeeStream:
         return getattr(self.original, name)
 
 
+class InputFilter(QObject):
+    """Study mode: logs panel clicks ("gui") and every key press, app-wide. Viewport presses are reported
+    by the viewport itself. Qt re-sends an ignored event to each parent widget, so an event is counted
+    once (same type and timestamp)."""
+
+    PRESSES = (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonDblClick)
+
+    def __init__(self, recorder, viewport):
+        super().__init__()
+        self.recorder, self.viewport = recorder, viewport
+        self._last = None
+
+    def eventFilter(self, obj, event):  # noqa: N802 (Qt API name)
+        kind = event.type()
+        if not isinstance(obj, QWidget) or (kind not in self.PRESSES and kind != QEvent.Type.KeyPress):
+            return False
+        stamp = (kind, event.timestamp())
+        if stamp == self._last:
+            return False
+        self._last = stamp
+        if kind == QEvent.Type.KeyPress:
+            self.recorder.log("key", QKeySequence(event.key()).toString(), event.isAutoRepeat())
+        elif obj is not self.viewport and not self.viewport.isAncestorOf(obj):
+            self.recorder.log("gui", obj.text() if isinstance(obj, QAbstractButton) else type(obj).__name__)
+        return False
+
+
 def _divider() -> QFrame:
     line = QFrame()
     line.setObjectName("Divider")
@@ -67,10 +99,12 @@ def _chip(caption: str) -> tuple[QFrame, QLabel]:
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, minimal: bool = False):
+    def __init__(self, minimal: bool = False, study: dict | None = None):
         super().__init__()
         self.setWindowTitle("RORA")
         self.resize(1600, 900)
+        self.study = study        # functions.gui.study.load_study() result, or None
+        self._trial_thread = None
         self.signals = Signals()
         self.bridge = UiBridge(self.signals.event.emit, minimal=minimal)
         self.runner = PipelineRunner(self.bridge, self.make_cfgs, run_stage)
@@ -91,6 +125,8 @@ class MainWindow(QMainWindow):
         self._clock.start()
         self._flush = QTimer(self, interval=250)
         self._flush.timeout.connect(self._flush_timeline)
+        if study:
+            self._setup_study()
 
     # --- layout ---
     def _build_ui(self) -> None:
@@ -118,7 +154,8 @@ class MainWindow(QMainWindow):
         self.theme_btn.clicked.connect(self.toggle_theme)
         h.addWidget(title)
         h.addSpacing(8)
-        for w in (object_chip, profile_chip, self.stem_chip):
+        self._header, self._chips = h, (object_chip, profile_chip, self.stem_chip)
+        for w in self._chips:
             h.addWidget(w)
         h.addStretch()
         for w in (self.capture_btn, self.run_btn, self.stop_btn, self.minimal_box, self.elapsed, self.theme_btn):
@@ -135,9 +172,11 @@ class MainWindow(QMainWindow):
         self.interaction = InteractionHost()
         self.editor = ParamEditor()
         self.log = LogView()
+        self._panel, self._dividers = p, []
         for i, w in enumerate((self.timeline, self.interaction, self.editor, self.log)):
             if i:
-                p.addWidget(_divider())
+                self._dividers.append(_divider())
+                p.addWidget(self._dividers[-1])
             p.addWidget(w, 1 if w is self.editor else 0)
 
         self.timeline.rerun.connect(self.rerun)
@@ -305,7 +344,10 @@ class MainWindow(QMainWindow):
             self.timeline.set_step(self.current_stage, payload["key"], "running")
         elif kind in ("scene", "checkpoint"):
             scene = payload if kind == "scene" else CheckpointScene(*payload)
-            self._mount(scene, "⏸ input" if kind == "scene" else "⏸ checkpoint")
+            if self.study and kind == "scene":
+                self._ready(scene)  # loaded; shown when the participant presses Start
+            else:
+                self._mount(scene, "⏸ input" if kind == "scene" else "⏸ checkpoint")
         elif kind == "stage_end":
             if self.scene is not None:  # stopped while waiting for input
                 self.scene = None
@@ -321,9 +363,11 @@ class MainWindow(QMainWindow):
             self.interaction.set_idle("Idle")
             self.stop_btn.setText("■ Stop")
             self.viewport.suspend(False)
+        elif kind == "trial_end":
+            self._end_trial(payload)
 
     def _mount(self, scene, waiting: str) -> None:
-        step = self.timeline.current_step(self.current_stage)
+        step = self.timeline.current_step(self.current_stage) if self.current_stage else None
         if step:
             self.timeline.set_step(self.current_stage, step, "waiting", waiting)
         scene.finish = self._finish_scene
@@ -331,6 +375,8 @@ class MainWindow(QMainWindow):
         try:
             self.viewport.mount(scene)
             self.interaction.set_widget(scene.widget())
+            if self.study:
+                self.recorder.start()  # a trial is timed from Start (scene appears) until Done
         except Exception:
             # never leave the worker blocked: fail the stage with the GUI-side traceback
             self.scene = None
@@ -340,15 +386,107 @@ class MainWindow(QMainWindow):
     def _finish_scene(self) -> None:
         if self.scene is None:
             return
+        if self.study:
+            self.recorder.stop()
         result = self.scene.result()
         self.scene = None
         self.viewport.unmount()
         self.interaction.set_idle("Computing…")
-        step = self.timeline.current_step(self.current_stage)
+        step = self.timeline.current_step(self.current_stage) if self.current_stage else None
         if step:
             self.timeline.set_step(self.current_stage, step, "running")
         self.viewport.suspend(self.bridge.minimal)
         self.bridge.resolve(result)
+
+    # --- study mode ---
+    def _setup_study(self) -> None:
+        now = datetime.now()
+        name = os.path.splitext(os.path.basename(self.study["study_file"]))[0]  # cfgs/study/P01.yml -> P01
+        self.study_stamp = f"{name}_{now:%Y%m%d_%H%M%S}"
+        self.study_started = now.isoformat(timespec="seconds")
+        self.recorder = st.Recorder()
+        self.records, self.trial_i, self._pending = [], 0, None
+        self.viewport.on_input = self.recorder.log
+        self._input_filter = InputFilter(self.recorder, self.viewport)
+        QApplication.instance().installEventFilter(self._input_filter)
+        for w in (self.run_btn, self.stop_btn, self.minimal_box, self.capture_btn, self.elapsed, self.timeline,
+                  self.editor, *self._chips, *self._dividers[:2]):
+            w.hide()
+        self._panel.setStretchFactor(self.interaction, 1)
+        self.study_label = QLabel("", objectName="ChipValue")
+        self.trial_btn = QPushButton("▶ Start")
+        self.trial_btn.setProperty("primary", True)
+        self.trial_btn.clicked.connect(self._start_pressed)
+        self._header.insertWidget(2, self.study_label)
+        self._header.insertWidget(self._header.count() - 1, self.trial_btn)  # top right, before the theme toggle
+        self.setWindowTitle(f"RORA · study {self.study['participant']}")
+        print(f"[info]: study {self.study['participant']}: results go to export/study/{self.study_stamp}/ "
+              f"and working/study/{self.study_stamp}/")
+        self._load_trial()
+
+    def _load_trial(self) -> None:
+        """Prepare the current trial in the background (B computes its suggestions here, untimed). The
+        viewport stays empty until the participant presses Start."""
+        trials, who = self.study["trials"], self.study["participant"]
+        self.viewport.set_actors([])
+        if self.trial_i >= len(trials):
+            self.study_label.setText(f"{who} · session complete")
+            self.trial_btn.hide()
+            self.interaction.set_idle(f"Session complete. Results: export/study/{self.study_stamp}/")
+            return
+        t = trials[self.trial_i]
+        self.study_label.setText(f"{who} · trial {t['index']}/{len(trials)} · {t['object']} · {t['condition']}")
+        self.trial_btn.setText("▶ Start")
+        self.trial_btn.setEnabled(False)
+        self.interaction.set_idle(f"Preparing trial {t['index']}…")
+        self.bridge.reset_stop()
+        self._trial_thread = threading.Thread(target=self._trial_worker, args=(t,), daemon=True, name="study")
+        self._trial_thread.start()
+
+    def _ready(self, scene) -> None:
+        self._pending = scene
+        self.trial_btn.setEnabled(True)
+        self.interaction.set_idle("Ready. Press ▶ Start (top right) to begin.")
+
+    def _start_pressed(self) -> None:
+        if self._pending is not None:
+            scene, self._pending = self._pending, None
+            self.trial_btn.setEnabled(False)
+            self._trial_started = datetime.now().isoformat(timespec="seconds")
+            self._mount(scene, "⏸ input")
+        elif self._trial_thread is None or not self._trial_thread.is_alive():
+            self._load_trial()  # retry after a failure
+
+    def _trial_worker(self, trial: dict) -> None:
+        set_ui(self.bridge)
+        try:
+            result = st.run_trial(trial)
+        except PipelineStopped:
+            return
+        except Exception:
+            self.bridge.post("trial_end", {"error": traceback.format_exc()})
+            return
+        self.bridge.post("trial_end", {"result": result})
+
+    def _end_trial(self, payload: dict) -> None:
+        trial = self.study["trials"][self.trial_i]
+        if "error" in payload:
+            print(payload["error"])
+            self.log.set_expanded(True)
+            self.interaction.set_idle("Trial failed (see the log). Fix the inputs, then retry.")
+            self.trial_btn.setText("Retry ▸")
+            self.trial_btn.setEnabled(True)
+            return
+        joints, manual_pairs, suggestions = payload["result"]
+        record = st.trial_record(self.study, trial, self._trial_started, self.recorder, joints, manual_pairs)
+        try:
+            path = st.save_trial(self.study, self.study_stamp, self.study_started, self.records, record, suggestions)
+            print(f"[info]: trial {trial['index']} saved to {os.path.relpath(path, st.ROOT)}")
+        except OSError as e:  # keep the data: the record goes to the terminal/log instead
+            print(yaml.safe_dump(record, sort_keys=False))
+            QMessageBox.critical(self, "Save failed", f"{e}\nThe trial record was printed to the log.")
+        self.trial_i += 1
+        self._load_trial()
 
     # --- theme / close ---
     def toggle_theme(self) -> None:
@@ -361,7 +499,8 @@ class MainWindow(QMainWindow):
         self.timeline.update()
 
     def closeEvent(self, event):  # noqa: N802 (Qt API name)
-        if self.runner.busy:
+        trial_busy = self._trial_thread is not None and self._trial_thread.is_alive()
+        if self.runner.busy or trial_busy:
             answer = QMessageBox.question(self, "Quit RORA", "A run is active. Stop it and quit?")
             if answer != QMessageBox.StandardButton.Yes:
                 event.ignore()

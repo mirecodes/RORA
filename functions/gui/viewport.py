@@ -117,10 +117,11 @@ class Viewport(QWidget):
         self.overlays = []
         self.guide = KeyGuide(self)
         self._picker = vtkPropPicker()
+        self.on_input = None  # study mode: (kind, detail) for every viewport mouse press (Recorder.log)
         self._tags = {}
         for ev, fn in (("LeftButtonPressEvent", self._left_press), ("LeftButtonReleaseEvent", self._left_release),
-                       ("RightButtonPressEvent", self._right_press), ("MouseMoveEvent", self._move),
-                       ("KeyPressEvent", self._key)):
+                       ("RightButtonPressEvent", self._right_press), ("MiddleButtonPressEvent", self._middle_press),
+                       ("MouseMoveEvent", self._move), ("KeyPressEvent", self._key)):
             self._tags[ev] = self.iren.AddObserver(ev, fn, 10.0)
         self.cube.set_view(HOME)  # start in the same isometric view R returns to
         self.apply_theme(th.current())
@@ -136,12 +137,21 @@ class Viewport(QWidget):
         """Stop lower-priority observers (the camera interactor style) from seeing this event."""
         self.iren.GetCommand(self._tags[ev]).SetAbortFlag(1)
 
+    def _report(self, kind: str, detail: str) -> None:
+        if self.on_input is not None:
+            self.on_input(kind, detail)
+
     def _left_press(self, obj, ev):
         x, y = self.iren.GetEventPosition()
-        if self.cube.on_press(x, y) or self.gizmo.on_press(x, y):
+        if self.cube.on_press(x, y):
+            self._report("view", "cube")
             self._swallow(ev)
             return
-        self._pick(x, y, "left")
+        if self.gizmo.on_press(x, y):
+            self._report("gizmo", "left")
+            self._swallow(ev)
+            return
+        self._report("axis" if self._pick(x, y, "left") else "view", "left")
 
     def _left_release(self, obj, ev):
         if self.gizmo.on_release():
@@ -150,9 +160,13 @@ class Viewport(QWidget):
     def _right_press(self, obj, ev):
         x, y = self.iren.GetEventPosition()
         if self.cube.contains(x, y):
+            self._report("view", "cube")
             self._swallow(ev)
             return
-        self._pick(x, y, "right")
+        self._report("axis" if self._pick(x, y, "right") else "view", "right")
+
+    def _middle_press(self, obj, ev):
+        self._report("view", "middle")
 
     def _move(self, obj, ev):
         x, y = self.iren.GetEventPosition()
@@ -161,9 +175,10 @@ class Viewport(QWidget):
             return
         self.cube.on_move(x, y)
 
-    def _pick(self, x, y, button: str) -> None:
+    def _pick(self, x, y, button: str) -> bool:
         if self.scene is not None and self._picker.Pick(x, y, 0, self.renderer):
-            self.scene.on_pick(self._picker.GetActor(), button)
+            return bool(self.scene.on_pick(self._picker.GetActor(), button))
+        return False
 
     def _key(self, obj, ev):
         sym = self.iren.GetKeySym() or ""

@@ -6,14 +6,14 @@ defaults:
   profile: partnet_object
 
 objects:
-  cat1: null
+  cat1: 
     bucket: {parts: 2, object_profile: bucket_20261029_015825}
     fan: {parts: 2, object_profile: fan_20261029_022019}
     globe: {parts: 2, object_profile: globe_20261029_023152}
     microwave: {parts: 2, object_profile: microwave_20261029_023442}
     trashcan: {parts: 2, object_profile: trashcan_20261029_023658}
     usb: {parts: 2, object_profile: usb_20261029_024902}
-  cat2: null
+  cat2: 
     box: {parts: 5, object_profile: box_20261029_025735}
     faucet: {parts: 4, object_profile: faucet_20261029_025923}
     folding_chair: {parts: 3, object_profile: null}

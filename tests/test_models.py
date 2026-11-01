@@ -1,5 +1,6 @@
-from functions.gui.models import (PartAssignment, cycle_state, group_fragments, group_pairs,
+from functions.gui.models import (ManualJoints, PartAssignment, cycle_state, group_fragments, group_pairs,
                                   valid_vectors)
+from functions.utils.urdf import joints_from_bicons
 
 
 def test_part_assignment():
@@ -41,6 +42,48 @@ def test_cycle_state_orders_revolute_picks():
     assert cycle_state(a, counter) == "None" and a["order"] is None
     assert cycle_state(b, counter) == "None" and b["order"] is None
     assert cycle_state(b, counter) == "Revolute" and b["order"] == 2
+
+
+def test_manual_joints_flow():
+    m = ManualJoints(parts_num=3)
+    assert (m.parent, m.child) == (1, 2) and m.can_add()
+    assert not m.confirm()                          # no triad yet
+    assert m.new_joint() and not m.new_joint()      # one triad at a time
+    assert [v["n"] for v in m.triad] == [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+    assert all(v["center"] == [0.0, 0.0, 0.0] for v in m.triad)
+    assert not m.confirm()                          # no arrow picked
+    cycle_state(m.triad[2], m.counter)
+    m.triad[2]["center"] = [0.5, 0.0, 0.0]
+    m.parent, m.child = 3, 1
+    assert m.confirm() and m.triad is None and m.can_add()
+    assert [(j["parent"], j["child"], len(j["vectors"])) for j in m.confirmed] == [(3, 1, 1)]
+    assert ManualJoints.describe(m.confirmed[0]) == "Parent 3 → Child 1 · Revolute (Z)"
+    joints = joints_from_bicons(m.bicons())
+    assert len(joints) == 1 and joints[0]["type"] == "Revolute"
+    assert (joints[0]["parent"], joints[0]["child"]) == (1, 3)
+    assert joints[0]["axis"]["n"] == [0.0, 0.0, 1.0] and joints[0]["axis"]["origin"] == [0.5, 0.0, 0.0]
+    m.remove(0)
+    assert m.confirmed == [] and m.bicons() == []
+
+
+def test_manual_joints_refuses_same_part():
+    m = ManualJoints(parts_num=2)
+    m.child = 1
+    assert not m.can_add() and not m.new_joint() and m.triad is None
+    m.child = 2
+    assert m.new_joint()
+    cycle_state(m.triad[0], m.counter)
+    m.child = 1
+    assert not m.confirm() and m.triad is not None and m.confirmed == []
+
+
+def test_manual_joints_two_arrows_merge_like_suggestions():
+    m = ManualJoints(parts_num=2)
+    m.new_joint()
+    cycle_state(m.triad[0], m.counter)
+    cycle_state(m.triad[1], m.counter)
+    assert m.confirm()
+    assert [j["type"] for j in joints_from_bicons(m.bicons())] == ["Spherical"]
 
 
 if __name__ == "__main__":

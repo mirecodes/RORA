@@ -245,6 +245,53 @@ def augment_vectors_for_pairs_with_map(bicons: List[dict], min_count: int = 2) -
     print("[info] Vector augmentation finished.")
 
 
+def load_segmented(states):
+    """(verts, faces, vert_label, parts_num): the refined mesh with the segment stage's vertex labels."""
+    ms = pymeshlab.MeshSet()
+    ms.load_new_mesh(states.refine.dirs.mesh)
+    ms.set_current_mesh(0)
+    current_mesh = ms.current_mesh()
+    verts = current_mesh.vertex_matrix()
+    faces = current_mesh.face_matrix().astype(np.int64)
+
+    vert_label = np.load(states.segment.dirs.vert_label).astype(int)
+    parts_num = int(states.segment.parts_num)
+    if len(vert_label) != len(verts):
+        raise RuntimeError(f"[error]: vert_label ({len(vert_label)}) does not match refined mesh ({len(verts)} verts). "
+                           "Re-run the segment stage.")
+    return verts, faces, vert_label, parts_num
+
+
+def suggest_bicons(art_cfgs: dict, verts, faces, vert_label, parts_num: int, debug: bool = False,
+                   step=lambda key: None) -> List[dict]:
+    """Automatic joint suggestion: axis estimation (unicons) → bidirectional fusion (bicons) → vector
+    candidates on each bicon. `step(key)` reports the 'unicons' and 'fusion' sub-steps."""
+    adj = adjacency(faces, len(verts))
+
+    step("unicons")
+    print("[info] Estimating unidirectional connections (unicons)...")
+    unicons = compute_unicons(verts, faces, parts_num, adj, vert_label, visualize_results=debug,
+                              **art_cfgs["axis_estimation"])
+
+    step("fusion")
+    print("[info] Fusing unicons into bidirectional connections (bicons)...")
+    diag = float(np.linalg.norm(verts.max(axis=0) - verts.min(axis=0)))
+    bicons = fuse_connections(unicons, scale=diag, **art_cfgs["fusion"])
+
+    # Visualizing the fusion details
+    if debug:
+        show_bicons(verts, faces, bicons)
+
+    if art_cfgs["allow_unpaired_unicon"]:
+        append_unpaired_unicons(unicons, bicons, verts)
+
+    print(f"[info]: len bicons {len(bicons)}")
+
+    prepare_vectors_for_bicons(bicons)
+    augment_vectors_for_pairs_with_map(bicons, min_count=art_cfgs["vector_augment_min_count"])  # optional
+    return bicons
+
+
 # =============================================================================
 # Stage (entry point)
 # =============================================================================
@@ -266,46 +313,14 @@ def stage_articulate(cfgs):
     # load states, refined mesh & vertex labels
     print("[info] Loading states, base mesh and vertex labels...")
     states = JsonHandler(cfgs.json_states_dir, auto_save=True)
-
-    ms = pymeshlab.MeshSet()
-    ms.load_new_mesh(states.refine.dirs.mesh)
-    ms.set_current_mesh(0)
-    current_mesh = ms.current_mesh()
-    verts = current_mesh.vertex_matrix()
-    faces = current_mesh.face_matrix().astype(np.int64)
-
-    vert_label = np.load(states.segment.dirs.vert_label).astype(int)
-    parts_num = int(states.segment.parts_num)
-    if len(vert_label) != len(verts):
-        raise RuntimeError(f"[error]: vert_label ({len(vert_label)}) does not match refined mesh ({len(verts)} verts). "
-                           "Re-run the segment stage.")
-    adj = adjacency(faces, len(verts))
+    verts, faces, vert_label, parts_num = load_segmented(states)
 
     # axis estimation + fusion + vectors
-    ui().step("unicons")
-    print("[info] Estimating unidirectional connections (unicons)...")
-    unicons = compute_unicons(
-        verts, faces, parts_num, adj, vert_label,
-        visualize_results=cfgs.debug_mode,
-        **artCfgs["axis_estimation"]
-    )
-
-    ui().step("fusion")
-    print("[info] Fusing unicons into bidirectional connections (bicons)...")
-    diag = float(np.linalg.norm(verts.max(axis=0) - verts.min(axis=0)))
-    bicons = fuse_connections(unicons, scale=diag, **artCfgs["fusion"])
-
-    # Visualizing the fusion details
-    if cfgs.debug_mode:
-        show_bicons(verts, faces, bicons)
-
-    if artCfgs["allow_unpaired_unicon"]:
-        append_unpaired_unicons(unicons, bicons, verts)
-
-    print(f"[info]: len bicons {len(bicons)}")
-
-    prepare_vectors_for_bicons(bicons)
-    augment_vectors_for_pairs_with_map(bicons, min_count=artCfgs["vector_augment_min_count"])  # optional
+    bicons = suggest_bicons(artCfgs, verts, faces, vert_label, parts_num, debug=cfgs.debug_mode, step=ui().step)
+    # Snapshot before selection: the selection UI moves/rotates the vectors in place (VectorGroupTarget),
+    # so the suggestions must be copied now to stay the automatic ones. tolist() makes plain copies.
+    suggestions = [{"pair": list(s["pair"]), "origin": s["origin"].tolist(), "n": s["n"].tolist(), "state": s["state"]}
+                   for s in suggestions_from_bicons(bicons)]
 
     # vector selection in the viewport (all part pairs in one scene)
     ui().step("vectors")
@@ -319,8 +334,6 @@ def stage_articulate(cfgs):
     # persist: everything the bind stage needs (JSON-safe), so a failure there never reruns this stage
     ui().step("save")
     print("[info] Persisting states...")
-    suggestions = [{"pair": list(s["pair"]), "origin": s["origin"].tolist(), "n": s["n"].tolist(), "state": s["state"]}
-                   for s in suggestions_from_bicons(bicons)]
     states.articulate = {}
     states.articulate.joints = joints
     states.articulate.suggestions = suggestions

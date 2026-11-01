@@ -1,0 +1,8 @@
+# User study: run with `.venv/bin/python -m functions.gui.app --study cfgs/study/example.yml`.
+# Trials run in the listed order. condition A = manual triad joints, B = suggested vectors.
+# Objects (parts, profile, object_profile) come from `objects_from`; each needs refine + segment results.
+participant: P00
+objects_from: cfgs/dev/batch_set_cfg.yml
+trials:
+  - {object: faucet, condition: A}
+  - {object: faucet, condition: B}

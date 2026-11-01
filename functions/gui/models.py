@@ -84,3 +84,55 @@ def cycle_state(vector: dict, counter: list[int]) -> str:
     elif state == "None":
         vector["order"] = None
     return state
+
+
+JOINT_STATES = ("Revolute", "Prismatic")
+
+
+class ManualJoints:
+    """User study condition A: joints authored one at a time from an X/Y/Z triad at the world origin.
+    Triad arrows cycle state like suggested vectors; confirm() stores the picked arrows with the chosen
+    parent/child, and bicons() hands the confirmed joints to joints_from_bicons."""
+
+    def __init__(self, parts_num: int):
+        self.parts_num = parts_num
+        self.parent, self.child = 1, min(2, parts_num)
+        self.triad: list[dict] | None = None
+        self.counter = [0]
+        self.confirmed: list[dict] = []   # {"parent", "child", "vectors"}
+
+    def can_add(self) -> bool:
+        return self.triad is None and self.parent != self.child
+
+    def new_joint(self) -> bool:
+        if not self.can_add():
+            return False
+        self.triad = [{"center": [0.0, 0.0, 0.0], "n": [float(x) for x in e], "state": "None", "axis": a}
+                      for a, e in zip("XYZ", np.eye(3))]
+        self.counter = [0]
+        return True
+
+    def picked(self) -> list[dict]:
+        return [v for v in self.triad or [] if v.get("state") in JOINT_STATES]
+
+    def can_confirm(self) -> bool:
+        return bool(self.picked()) and self.parent != self.child
+
+    def confirm(self) -> bool:
+        if not self.can_confirm():
+            return False
+        self.confirmed.append({"parent": self.parent, "child": self.child,
+                               "vectors": [dict(v) for v in self.picked()]})
+        self.triad = None
+        return True
+
+    def remove(self, i: int) -> None:
+        del self.confirmed[i]
+
+    def bicons(self) -> list[dict]:
+        return [{"a": {"src": j["parent"], "dst": j["child"]}, "vectors": j["vectors"]} for j in self.confirmed]
+
+    @staticmethod
+    def describe(joint: dict) -> str:
+        arrows = ", ".join(f"{v['state']} ({v['axis']})" for v in joint["vectors"])
+        return f"Parent {joint['parent']} → Child {joint['child']} · {arrows}"

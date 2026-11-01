@@ -1,0 +1,8 @@
+# User study: run with `scripts/run_study.sh example` (copy this file to cfgs/study/<participant>.yml).
+# Trials run in the listed order. condition A = manual triad joints, B = suggested vectors.
+# Objects (parts, profile, object_profile) come from `objects_from`; each needs refine + segment results.
+participant: P00
+objects_from: cfgs/dev/batch_set_cfg.yml
+trials:
+  - {object: fan, condition: A}
+  - {object: fan, condition: B}

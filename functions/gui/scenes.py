@@ -5,13 +5,13 @@ import sys
 import numpy as np
 import vedo
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QDoubleSpinBox, QGridLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout,
+from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QGridLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout,
                                QWidget)
 
 from functions.gui import theme as th
 from functions.gui.manip import (KEY_HINTS, AssemblyTarget, VectorGroupTarget, from_fields, key_delta,
                                  to_fields)
-from functions.gui.models import PartAssignment, cycle_state, group_pairs, valid_vectors
+from functions.gui.models import ManualJoints, PartAssignment, cycle_state, group_pairs, valid_vectors
 from functions.math.geometry import normalize
 from functions.visualize.style import arrow_params, label_colors, pastel_hex, state_arrow
 
@@ -79,8 +79,9 @@ class Scene:
     def on_change(self) -> None:
         """Sync panel fields after the target moved."""
 
-    def on_pick(self, actor, button: str) -> None:
-        pass
+    def on_pick(self, actor, button: str) -> bool:
+        """True when the click changed the scene (a joint arrow or a fragment)."""
+        return False
 
     def on_enter(self) -> None:
         if self.finish:
@@ -270,13 +271,14 @@ class PartSelectScene(Scene):
         self._update_chips()
         self._render()
 
-    def on_pick(self, actor, button: str) -> None:
+    def on_pick(self, actor, button: str) -> bool:
         i = self.index.get(actor)
         if i is None:
-            return
+            return False
         changed = self.model.assign(i) if button == "left" else self.model.undo(i)
         if changed:
             self._refresh()
+        return changed
 
     def on_key(self, key: str) -> bool:
         if key == "tab":
@@ -376,13 +378,14 @@ class JointSelectScene(Scene):
         self.viewport.plt.add(*self._make_arrows())
         self._update_labels()
 
-    def on_pick(self, actor, button: str) -> None:
+    def on_pick(self, actor, button: str) -> bool:
         v = self.arrows.get(actor)
         if v is None or button != "left":
-            return
+            return False
         cycle_state(v, self.counters[self.i])
         self._redraw_arrows()
         self._render()
+        return True
 
     def _go(self, step: int) -> None:
         if not self.pairs or self.viewport is None:
@@ -442,8 +445,164 @@ class JointSelectScene(Scene):
         self._redraw_arrows()
 
 
+class ManualJointScene(Scene):
+    """User study condition A: no suggestions. One X/Y/Z triad at a time starts at the world origin; keys
+    and the gizmo move it as a whole, clicks set each arrow's type, and Confirm stores it for the chosen
+    parent/child pair."""
+    title = "Articulate · Manual joints"
+    hint = "Pick parent and child, add a joint, move the triad, then click arrows: None → Revolute → Prismatic."
+    controls = [("Click arrow", "cycle type")] + KEY_HINTS + [("G", "toggle gizmo"), ("R", "reset view"),
+                                                             ("Enter", "confirm joint")]
+    turn_deg = 1.5
+
+    def __init__(self, verts, faces, vert_label, parts_num: int):
+        super().__init__()
+        self.verts, self.faces, self.vert_label = verts, faces, vert_label
+        self.model = ManualJoints(parts_num)
+        self.size = arrow_params(verts, scale=0.8)
+        diag = float(np.linalg.norm(verts.max(axis=0) - verts.min(axis=0)))
+        self.move_step = diag * 0.02 if np.isfinite(diag) and diag > 0 else 1.0
+        self.arrows = {}        # vtkActor -> triad vector dict
+        self.arrow_objs = []
+        self.boxes = {}
+        self.list_box = None
+
+    def build(self) -> list:
+        self.mesh = vedo.Mesh([self.verts, self.faces]).alpha(0.4).pickable(False)
+        self._recolor()
+        return [self.mesh, *self._make_arrows()]
+
+    def _recolor(self) -> None:
+        self.mesh.pointcolors = label_colors(self.vert_label, keep=(self.model.parent, self.model.child))
+
+    def _make_arrows(self) -> list:
+        """Pickable triad arrows plus the confirmed joints' arrows (faded, not pickable)."""
+        self.arrows, self.arrow_objs = {}, []
+        for v in self.model.triad or []:
+            arrow = state_arrow(np.asarray(v["center"], dtype=float), normalize(v["n"]), v["state"], self.size)
+            self.arrows[arrow.actor] = v
+            self.arrow_objs.append(arrow)
+        for joint in self.model.confirmed:
+            for v in joint["vectors"]:
+                arrow = state_arrow(np.asarray(v["center"], dtype=float), normalize(v["n"]), v["state"], self.size)
+                self.arrow_objs.append(arrow.pickable(False).alpha(0.45))
+        return self.arrow_objs
+
+    def _redraw(self) -> None:
+        if self.viewport is None:
+            return
+        if self.arrow_objs:
+            self.viewport.plt.remove(*self.arrow_objs)
+        self.viewport.plt.add(*self._make_arrows())
+
+    def _changed(self) -> None:
+        self._redraw()
+        self._update_panel()
+        self._render()
+
+    def on_pick(self, actor, button: str) -> bool:
+        v = self.arrows.get(actor)
+        if v is None or button != "left":
+            return False
+        cycle_state(v, self.model.counter)
+        self._changed()
+        return True
+
+    def on_enter(self) -> None:
+        self._confirm()
+
+    def _attach(self, target) -> None:
+        self.target = target
+        if self.viewport is not None:
+            self.viewport.gizmo.attach(target)
+        self._changed()
+
+    def _new(self) -> None:
+        if self.model.new_joint():
+            self._attach(VectorGroupTarget(self.model.triad, on_change=lambda d: self._redraw()))
+
+    def _confirm(self) -> None:
+        if self.model.confirm():
+            self._attach(None)
+
+    def _remove(self, i: int) -> None:
+        self.model.remove(i)
+        self._changed()
+
+    def _set_pair(self, *_) -> None:
+        self.model.parent = self.boxes["parent"].currentData()
+        self.model.child = self.boxes["child"].currentData()
+        self._recolor()
+        self._update_panel()
+        self._render()
+
+    def _done(self) -> None:
+        if self.finish:
+            self.finish()
+
+    def widget(self) -> QWidget:
+        w = QWidget()
+        layout = _column(w)
+        layout.addWidget(section("Part pair"))
+        grid = QGridLayout()
+        for row, key in enumerate(("parent", "child")):
+            box = QComboBox()
+            box.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # keep keyboard focus in the viewport
+            for p in range(1, self.model.parts_num + 1):
+                box.addItem(f"Part {p}", p)
+            box.setCurrentIndex(getattr(self.model, key) - 1)
+            box.currentIndexChanged.connect(self._set_pair)
+            self.boxes[key] = box
+            grid.addWidget(QLabel(key.capitalize()), row, 0)
+            grid.addWidget(box, row, 1)
+        layout.addLayout(grid)
+        row = QHBoxLayout()
+        self.new_btn = button("+ New joint", self._new)
+        self.confirm_btn = button("Confirm joint", self._confirm)
+        row.addWidget(self.new_btn)
+        row.addWidget(self.confirm_btn)
+        layout.addLayout(row)
+        layout.addWidget(section("Joints"))
+        self.list_box = QVBoxLayout()
+        self.list_box.setSpacing(4)
+        layout.addLayout(self.list_box)
+        footer = QHBoxLayout()
+        footer.addStretch()
+        self.primary = primary_button("Done ▸", self._done)
+        footer.addWidget(self.primary)
+        layout.addLayout(footer)
+        self._update_panel()
+        return w
+
+    def _update_panel(self) -> None:
+        if self.list_box is None:
+            return
+        self.new_btn.setEnabled(self.model.can_add())
+        self.confirm_btn.setEnabled(self.model.can_confirm())
+        while self.list_box.count():
+            self.list_box.takeAt(0).widget().deleteLater()
+        if not self.model.confirmed:
+            self.list_box.addWidget(QLabel("No joints yet.", objectName="Muted"))
+        for i, joint in enumerate(self.model.confirmed):
+            row = QWidget()
+            h = QHBoxLayout(row)
+            h.setContentsMargins(0, 0, 0, 0)
+            text = QLabel(ManualJoints.describe(joint))
+            text.setWordWrap(True)
+            h.addWidget(text, 1)
+            h.addWidget(button("✕", lambda i=i: self._remove(i)))
+            self.list_box.addWidget(row)
+
+    def on_theme(self) -> None:
+        self._redraw()
+
+    def result(self):
+        return {"bicons": self.model.bicons(),
+                "manual_pairs": [{"parent": j["parent"], "child": j["child"]} for j in self.model.confirmed]}
+
+
 if __name__ == "__main__":
-    # Manual check: `.venv/bin/python -m functions.gui.scenes align|parts|joints [--smoke]`
+    # Manual check: `.venv/bin/python -m functions.gui.scenes align|parts|joints|manual [--smoke]`
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication, QSplitter
 
@@ -461,6 +620,8 @@ if __name__ == "__main__":
                    "vectors": [{"n": [0, 0, 1], "center": [0, 0, 0.5]}, {"n": [0, 1, 0]}]},
                   {"a": {"src": 2, "dst": 3}, "center": [1, 0, 0], "vectors": [{"n": [1, 0, 0]}]}]
         scene = JointSelectScene(bicons, verts, faces, label)
+    elif kind == "manual":
+        scene = ManualJointScene(verts, faces, np.where(verts[:, 0] < 0, 1, 2), 2)
     else:
         scene = AlignScene(verts, faces)
 
