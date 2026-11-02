@@ -387,7 +387,7 @@ class JointSelectScene(Scene):
     hint = "Click arrows: None → Revolute → Prismatic. Keys and gizmo move every vector of this pair."
     controls = [("Click arrow", "cycle type")] + KEY_HINTS + [("G", "toggle gizmo"), ("R", "reset view"),
                                                              ("Enter", "next pair / done")]
-    turn_deg = 1.5
+    turn_deg = 1.0
 
     def __init__(self, bicons, verts, faces, vert_label):
         super().__init__()
@@ -397,7 +397,7 @@ class JointSelectScene(Scene):
         self.counters = [[0] for _ in self.pairs]
         self.size = arrow_params(verts, scale=0.8)
         diag = float(np.linalg.norm(verts.max(axis=0) - verts.min(axis=0)))
-        self.move_step = diag * 0.02 if np.isfinite(diag) and diag > 0 else 1.0
+        self.move_step = diag * 0.005 if np.isfinite(diag) and diag > 0 else 1.0
         self.i = 0
         self.arrows = {}        # vtkActor -> vector dict
         self.arrow_objs = []
@@ -551,7 +551,7 @@ class ManualJointScene(Scene):
     hint = "Pick parent and child, add a joint, move the triad, then click arrows: None → Revolute → Prismatic."
     controls = [("Click arrow", "cycle type")] + KEY_HINTS + [("G", "toggle gizmo"), ("R", "reset view"),
                                                              ("Enter", "confirm joint")]
-    turn_deg = 1.5
+    turn_deg = 1.0
 
     def __init__(self, verts, faces, vert_label, parts_num: int):
         super().__init__()
@@ -559,7 +559,7 @@ class ManualJointScene(Scene):
         self.model = ManualJoints(parts_num)
         self.size = arrow_params(verts, scale=0.8)
         diag = float(np.linalg.norm(verts.max(axis=0) - verts.min(axis=0)))
-        self.move_step = diag * 0.02 if np.isfinite(diag) and diag > 0 else 1.0
+        self.move_step = diag * 0.005 if np.isfinite(diag) and diag > 0 else 1.0
         self.arrows = {}        # vtkActor -> triad vector dict
         self.arrow_objs = []
         self.boxes = {}
