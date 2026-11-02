@@ -56,8 +56,8 @@ def test_manual_joints_flow():
     m.triad[2]["center"] = [0.5, 0.0, 0.0]
     m.parent, m.child = 3, 1
     assert m.confirm() and m.triad is None and m.can_add()
-    assert [(j["parent"], j["child"], len(j["vectors"])) for j in m.confirmed] == [(3, 1, 1)]
-    assert ManualJoints.describe(m.confirmed[0]) == "Parent 3 → Child 1 · Revolute (Z)"
+    assert [(j["parent"], j["child"], len(j["triad"])) for j in m.confirmed] == [(3, 1, 3)]  # whole triad kept
+    assert ManualJoints.describe(m.confirmed[0]) == "3 → 1 · Revolute Z"
     joints = joints_from_bicons(m.bicons())
     assert len(joints) == 1 and joints[0]["type"] == "Revolute"
     assert (joints[0]["parent"], joints[0]["child"]) == (1, 3)
@@ -75,6 +75,30 @@ def test_manual_joints_refuses_same_part():
     cycle_state(m.triad[0], m.counter)
     m.child = 1
     assert not m.confirm() and m.triad is not None and m.confirmed == []
+
+
+def test_manual_joints_edit_cancel_and_update():
+    m = ManualJoints(parts_num=3)
+    for parent, child, axis in ((1, 2, 2), (1, 3, 0)):
+        m.parent, m.child = parent, child
+        m.new_joint()
+        cycle_state(m.triad[axis], m.counter)
+        m.confirm()
+    m.parent, m.child = 2, 3
+    assert m.edit(0) and m.editing == 0 and (m.parent, m.child) == (1, 2)
+    assert not m.edit(1) and not m.remove(1) and not m.can_add()   # one joint at a time
+    cycle_state(m.triad[2], m.counter)                               # Revolute -> Prismatic
+    m.triad[2]["center"] = [9.0, 9.0, 9.0]
+    m.cancel()
+    assert m.triad is None and m.editing is None
+    assert ManualJoints.describe(m.confirmed[0]) == "1 → 2 · Revolute Z"     # cancel keeps the original
+    assert m.confirmed[0]["triad"][2]["center"] == [0.0, 0.0, 0.0]
+    assert m.edit(0)
+    cycle_state(m.triad[2], m.counter)
+    m.child = 3
+    assert m.confirm() and m.editing is None
+    assert [ManualJoints.describe(j) for j in m.confirmed] == ["1 → 3 · Prismatic Z", "1 → 3 · Revolute X"]
+    assert m.remove(0) and [ManualJoints.describe(j) for j in m.confirmed] == ["1 → 3 · Revolute X"]
 
 
 def test_manual_joints_two_arrows_merge_like_suggestions():

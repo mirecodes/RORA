@@ -1,0 +1,11 @@
+# Tutorial for P05: `scripts/run_tutorial.sh P05`, before `scripts/run_study.sh P05`. Skip ▸▸ (top right) drops a trial.
+# One object per category, none of P05's test objects; each object A (manual) then B (suggestion). Design: cfgs/study/DESIGN.md.
+participant: P05_tutorial
+objects_from: cfgs/dev/batch_set_cfg.yml
+trials:
+  - {object: bucket, condition: A}
+  - {object: bucket, condition: B}
+  - {object: box, condition: A}
+  - {object: box, condition: B}
+  - {object: stapler, condition: A}
+  - {object: stapler, condition: B}

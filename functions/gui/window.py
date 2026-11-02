@@ -401,11 +401,11 @@ class MainWindow(QMainWindow):
     # --- study mode ---
     def _setup_study(self) -> None:
         now = datetime.now()
-        name = os.path.splitext(os.path.basename(self.study["study_file"]))[0]  # cfgs/study/P01.yml -> P01
+        name = os.path.splitext(os.path.basename(self.study["study_file"]))[0]  # cfgs/study/P01/P01.yml -> P01
         self.study_stamp = f"{name}_{now:%Y%m%d_%H%M%S}"
         self.study_started = now.isoformat(timespec="seconds")
         self.recorder = st.Recorder()
-        self.records, self.trial_i, self._pending = [], 0, None
+        self.records, self.trial_i, self._pending, self._skipping = [], 0, None, False
         self.viewport.on_input = self.recorder.log
         self._input_filter = InputFilter(self.recorder, self.viewport)
         QApplication.instance().installEventFilter(self._input_filter)
@@ -419,6 +419,10 @@ class MainWindow(QMainWindow):
         self.trial_btn.clicked.connect(self._start_pressed)
         self._header.insertWidget(2, self.study_label)
         self._header.insertWidget(self._header.count() - 1, self.trial_btn)  # top right, before the theme toggle
+        self.skip_btn = QPushButton("Skip ▸▸")
+        self.skip_btn.clicked.connect(self._skip_pressed)
+        self.skip_btn.setVisible(bool(self.study.get("tutorial")))
+        self._header.insertWidget(self._header.count() - 1, self.skip_btn)
         self.setWindowTitle(f"RORA · study {self.study['participant']}")
         print(f"[info]: study {self.study['participant']}: results go to export/study/{self.study_stamp}/ "
               f"and working/study/{self.study_stamp}/")
@@ -432,6 +436,7 @@ class MainWindow(QMainWindow):
         if self.trial_i >= len(trials):
             self.study_label.setText(f"{who} · session complete")
             self.trial_btn.hide()
+            self.skip_btn.hide()
             self.interaction.set_idle(f"Session complete. Results: export/study/{self.study_stamp}/")
             return
         t = trials[self.trial_i]
@@ -444,6 +449,9 @@ class MainWindow(QMainWindow):
         self._trial_thread.start()
 
     def _ready(self, scene) -> None:
+        if self._skipping:  # posted just as Skip was pressed (the stop may have been missed): release it
+            self.bridge.request_stop()
+            return
         self._pending = scene
         self.trial_btn.setEnabled(True)
         self.interaction.set_idle("Ready. Press ▶ Start (top right) to begin.")
@@ -452,16 +460,32 @@ class MainWindow(QMainWindow):
         if self._pending is not None:
             scene, self._pending = self._pending, None
             self.trial_btn.setEnabled(False)
+            self.trial_btn.setText("● In progress")
             self._trial_started = datetime.now().isoformat(timespec="seconds")
             self._mount(scene, "⏸ input")
         elif self._trial_thread is None or not self._trial_thread.is_alive():
             self._load_trial()  # retry after a failure
+
+    def _skip_pressed(self) -> None:
+        """Tutorial: drop the current trial unsaved. Stops its worker; _end_trial moves on once it exits."""
+        if self._trial_thread is None or not self._trial_thread.is_alive():  # failed, waiting for Retry
+            self.trial_i += 1
+            self._load_trial()
+            return
+        self._skipping, self._pending = True, None
+        self.skip_btn.setEnabled(False)
+        if self.scene is not None:
+            self.recorder.stop()
+            self.scene = None
+            self.viewport.unmount()
+        self.bridge.request_stop()
 
     def _trial_worker(self, trial: dict) -> None:
         set_ui(self.bridge)
         try:
             result = st.run_trial(trial)
         except PipelineStopped:
+            self.bridge.post("trial_end", {"skipped": True})
             return
         except Exception:
             self.bridge.post("trial_end", {"error": traceback.format_exc()})
@@ -470,6 +494,14 @@ class MainWindow(QMainWindow):
 
     def _end_trial(self, payload: dict) -> None:
         trial = self.study["trials"][self.trial_i]
+        if "skipped" in payload:  # also posted when closing the window; only Skip moves on
+            if self._skipping:
+                print(f"[info]: trial {trial['index']} skipped")
+                self._skipping = False
+                self.skip_btn.setEnabled(True)
+                self.trial_i += 1
+                self._load_trial()
+            return
         if "error" in payload:
             print(payload["error"])
             self.log.set_expanded(True)

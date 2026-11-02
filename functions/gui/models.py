@@ -1,4 +1,5 @@
 """Pure interaction state for the Segment and Articulate scenes (no Qt/VTK)."""
+import copy
 from collections import defaultdict
 
 import numpy as np
@@ -89,17 +90,24 @@ def cycle_state(vector: dict, counter: list[int]) -> str:
 JOINT_STATES = ("Revolute", "Prismatic")
 
 
+def picked(vectors) -> list[dict]:
+    """The vectors selected as a joint (Revolute or Prismatic)."""
+    return [v for v in vectors or [] if v.get("state") in JOINT_STATES]
+
+
 class ManualJoints:
     """User study condition A: joints authored one at a time from an X/Y/Z triad at the world origin.
-    Triad arrows cycle state like suggested vectors; confirm() stores the picked arrows with the chosen
-    parent/child, and bicons() hands the confirmed joints to joints_from_bicons."""
+    Triad arrows cycle state like suggested vectors; confirm() stores the whole triad with the chosen
+    parent/child, and edit(i) brings a confirmed one back as the active triad (cancel() keeps the original).
+    bicons() hands the picked arrows of every confirmed joint to joints_from_bicons."""
 
     def __init__(self, parts_num: int):
         self.parts_num = parts_num
         self.parent, self.child = 1, min(2, parts_num)
         self.triad: list[dict] | None = None
+        self.editing: int | None = None   # index in `confirmed` the active triad replaces on confirm
         self.counter = [0]
-        self.confirmed: list[dict] = []   # {"parent", "child", "vectors"}
+        self.confirmed: list[dict] = []   # {"parent", "child", "triad"}
 
     def can_add(self) -> bool:
         return self.triad is None and self.parent != self.child
@@ -112,27 +120,43 @@ class ManualJoints:
         self.counter = [0]
         return True
 
-    def picked(self) -> list[dict]:
-        return [v for v in self.triad or [] if v.get("state") in JOINT_STATES]
+    def edit(self, i: int) -> bool:
+        if self.triad is not None:
+            return False
+        joint = self.confirmed[i]
+        self.triad = copy.deepcopy(joint["triad"])
+        self.parent, self.child, self.editing = joint["parent"], joint["child"], i
+        self.counter = [max(v.get("order") or 0 for v in self.triad)]
+        return True
+
+    def cancel(self) -> None:
+        """Drop the active triad: a new joint is discarded, an edited one keeps its confirmed version."""
+        self.triad = self.editing = None
 
     def can_confirm(self) -> bool:
-        return bool(self.picked()) and self.parent != self.child
+        return bool(picked(self.triad)) and self.parent != self.child
 
     def confirm(self) -> bool:
         if not self.can_confirm():
             return False
-        self.confirmed.append({"parent": self.parent, "child": self.child,
-                               "vectors": [dict(v) for v in self.picked()]})
-        self.triad = None
+        joint = {"parent": self.parent, "child": self.child, "triad": self.triad}
+        if self.editing is None:
+            self.confirmed.append(joint)
+        else:
+            self.confirmed[self.editing] = joint
+        self.triad = self.editing = None
         return True
 
-    def remove(self, i: int) -> None:
+    def remove(self, i: int) -> bool:
+        if self.triad is not None:
+            return False
         del self.confirmed[i]
+        return True
 
     def bicons(self) -> list[dict]:
-        return [{"a": {"src": j["parent"], "dst": j["child"]}, "vectors": j["vectors"]} for j in self.confirmed]
+        return [{"a": {"src": j["parent"], "dst": j["child"]}, "vectors": picked(j["triad"])} for j in self.confirmed]
 
     @staticmethod
     def describe(joint: dict) -> str:
-        arrows = ", ".join(f"{v['state']} ({v['axis']})" for v in joint["vectors"])
-        return f"Parent {joint['parent']} → Child {joint['child']} · {arrows}"
+        arrows = ", ".join(f"{v['state']} {v['axis']}" for v in picked(joint["triad"]))
+        return f"{joint['parent']} → {joint['child']} · {arrows}"

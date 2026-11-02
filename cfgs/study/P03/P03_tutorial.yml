@@ -1,0 +1,11 @@
+# Tutorial for P03: `scripts/run_tutorial.sh P03`, before `scripts/run_study.sh P03`. Skip ▸▸ (top right) drops a trial.
+# One object per category, none of P03's test objects; each object A (manual) then B (suggestion). Design: cfgs/study/DESIGN.md.
+participant: P03_tutorial
+objects_from: cfgs/dev/batch_set_cfg.yml
+trials:
+  - {object: usb, condition: A}
+  - {object: usb, condition: B}
+  - {object: toilet, condition: A}
+  - {object: toilet, condition: B}
+  - {object: stapler, condition: A}
+  - {object: stapler, condition: B}

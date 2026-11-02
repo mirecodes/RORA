@@ -9,6 +9,8 @@ def main(argv=None) -> int:
                         help="no debug checkpoints, no live viewport during compute, terminal-only log")
     parser.add_argument("--study", metavar="FILE",
                         help="user study mode: run the articulation trials listed in FILE (cfgs/study/example.yml)")
+    parser.add_argument("--tutorial", action="store_true",
+                        help="with --study: practice run, a Skip button drops the current trial unsaved")
     args = parser.parse_args(argv)
     study = None
     if args.study:
@@ -17,6 +19,7 @@ def main(argv=None) -> int:
         from functions.gui.study import load_study
         try:
             study = load_study(args.study)
+            study["tutorial"] = args.tutorial
         except (OSError, ValueError, yaml.YAMLError) as e:
             print(f"[error]: {e}")
             return 1

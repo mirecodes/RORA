@@ -1,0 +1,11 @@
+# Tutorial for P10: `scripts/run_tutorial.sh P10`, before `scripts/run_study.sh P10`. Skip ▸▸ (top right) drops a trial.
+# One object per category, none of P10's test objects; each object A (manual) then B (suggestion). Design: cfgs/study/DESIGN.md.
+participant: P10_tutorial
+objects_from: cfgs/dev/batch_set_cfg.yml
+trials:
+  - {object: microwave, condition: A}
+  - {object: microwave, condition: B}
+  - {object: refrigerator, condition: A}
+  - {object: refrigerator, condition: B}
+  - {object: lamp, condition: A}
+  - {object: lamp, condition: B}

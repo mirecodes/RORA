@@ -5,13 +5,15 @@ import sys
 import numpy as np
 import vedo
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QGridLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout,
                                QWidget)
 
 from functions.gui import theme as th
 from functions.gui.manip import (KEY_HINTS, AssemblyTarget, VectorGroupTarget, from_fields, key_delta,
                                  to_fields)
-from functions.gui.models import ManualJoints, PartAssignment, cycle_state, group_pairs, valid_vectors
+from functions.gui.models import (JOINT_STATES, ManualJoints, PartAssignment, cycle_state, group_pairs, picked,
+                                  valid_vectors)
 from functions.math.geometry import normalize
 from functions.visualize.style import arrow_params, label_colors, pastel_hex, state_arrow
 
@@ -43,6 +45,65 @@ def _column(widget: QWidget) -> QVBoxLayout:
     layout.setSpacing(6)
     layout.setAlignment(Qt.AlignmentFlag.AlignTop)
     return layout
+
+
+def swatch(color: str, size: int = 10) -> QLabel:
+    s = QLabel()
+    s.setFixedSize(size, size)
+    set_swatch(s, color)
+    return s
+
+
+def set_swatch(s: QLabel, color: str) -> None:
+    s.setStyleSheet(f"background: {color}; border-radius: 2px;")
+
+
+def color_icon(color: str) -> QIcon:
+    pix = QPixmap(12, 12)
+    pix.fill(QColor(color))
+    return QIcon(pix)
+
+
+def part_legend(parts_num: int) -> QGridLayout:
+    """Part k -> its mesh color (pastel_hex, as in label_colors), three per row."""
+    grid = QGridLayout()
+    grid.setHorizontalSpacing(12)
+    for n, p in enumerate(range(1, parts_num + 1)):
+        cell = QHBoxLayout()
+        cell.setSpacing(4)
+        cell.addWidget(swatch(pastel_hex(p)))
+        cell.addWidget(QLabel(f"Part {p}"))
+        cell.addStretch()
+        grid.addLayout(cell, n // 3, n % 3)
+    return grid
+
+
+def fill_joint_list(layout: QVBoxLayout, rows, empty: str) -> None:
+    """Refill `layout` with one clickable row per joint. rows: (text, on_click, current, enabled, on_remove);
+    `current` highlights the row, and its ✕ stays off while it is being edited."""
+    while layout.count():
+        old = layout.takeAt(0).widget()
+        old.hide()  # deleteLater waits for the event loop
+        old.deleteLater()
+    if not rows:
+        layout.addWidget(QLabel(empty, objectName="Muted"))
+    for text, on_click, current, enabled, on_remove in rows:
+        row = QWidget()
+        h = QHBoxLayout(row)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(4)
+        b = button(text, on_click)
+        b.setCheckable(True)
+        b.setChecked(current)
+        b.setEnabled(enabled)
+        b.setToolTip(text)
+        b.setStyleSheet("QPushButton { text-align: left; padding-left: 8px; }")
+        h.addWidget(b, 1)
+        if on_remove is not None:
+            x = button("✕", on_remove)
+            x.setEnabled(enabled and not current)
+            h.addWidget(x)
+        layout.addWidget(row)
 
 
 class Scene:
@@ -340,7 +401,7 @@ class JointSelectScene(Scene):
         self.i = 0
         self.arrows = {}        # vtkActor -> vector dict
         self.arrow_objs = []
-        self.pair_label = self.counts_label = None
+        self.pair_label = self.counts_label = self.list_box = None
         self._select_pair(0)
 
     def _select_pair(self, i: int) -> None:
@@ -384,17 +445,23 @@ class JointSelectScene(Scene):
             return False
         cycle_state(v, self.counters[self.i])
         self._redraw_arrows()
+        self._update_list()
         self._render()
         return True
 
     def _go(self, step: int) -> None:
+        if self.pairs:
+            self._goto((self.i + step) % len(self.pairs))
+
+    def _goto(self, i: int) -> None:
         if not self.pairs or self.viewport is None:
             return
-        self._select_pair((self.i + step) % len(self.pairs))
+        self._select_pair(i)
         self.viewport.set_actors(self.build())
         self.viewport.gizmo.attach(self.target)
         self.viewport.refresh_overlays()
         self._update_labels()
+        self._update_list()
         self._render()
 
     def on_enter(self) -> None:
@@ -410,21 +477,48 @@ class JointSelectScene(Scene):
         self.pair_label = QLabel()
         self.counts_label = QLabel()
         self.counts_label.setObjectName("Muted")
-        layout.addWidget(self.pair_label)
+        pair_row = QHBoxLayout()
+        pair_row.setSpacing(4)
+        self.pair_swatches = (swatch(th.current().none), swatch(th.current().none))  # the pair's part colors
+        for s in self.pair_swatches:
+            pair_row.addWidget(s)
+        pair_row.addSpacing(4)
+        pair_row.addWidget(self.pair_label, 1)
+        layout.addLayout(pair_row)
         layout.addWidget(self.counts_label)
         legend = QHBoxLayout()
         t = th.current()
         for name, color in (("Revolute", t.revolute), ("Prismatic", t.prismatic), ("None", t.none)):
-            swatch = QLabel()
-            swatch.setFixedSize(10, 10)
-            swatch.setStyleSheet(f"background: {color}; border-radius: 2px;")
-            legend.addWidget(swatch)
+            legend.addWidget(swatch(color))
             legend.addWidget(QLabel(name))
         legend.addStretch()
         layout.addLayout(legend)
-        layout.addLayout(self._footer("Next pair", extra=[button("◂ Prev", lambda: self._go(-1))]))
+        layout.addWidget(section("Joints"))
+        self.list_box = QVBoxLayout()
+        self.list_box.setSpacing(4)
+        layout.addLayout(self.list_box)
+        footer = QHBoxLayout()
+        footer.addStretch()
+        self.prev_btn = button("◂ Prev pair", lambda: self._goto(self.i - 1) if self.i > 0 else None)
+        footer.addWidget(self.prev_btn)
+        self.primary = primary_button("Next pair ▸", self.on_enter)
+        footer.addWidget(self.primary)
+        layout.addLayout(footer)
         self._update_labels()
+        self._update_list()
         return w
+
+    def _update_list(self) -> None:
+        """Every pair with a selected vector; clicking one jumps back to that pair."""
+        if self.list_box is None:
+            return
+        rows = []
+        for idx, ((p, q), _) in enumerate(self.pairs):
+            states = [v["state"] for v in picked([v for _, v in self.items[idx]])]
+            if states:
+                kinds = ", ".join(f"{k} ×{states.count(k)}" for k in JOINT_STATES if k in states)
+                rows.append((f"Parts {p} ↔ {q} · {kinds}", lambda idx=idx: self._goto(idx), idx == self.i, True, None))
+        fill_joint_list(self.list_box, rows, "No joints selected yet.")
 
     def _update_labels(self) -> None:
         if self.pair_label is None:
@@ -433,13 +527,17 @@ class JointSelectScene(Scene):
             self.pair_label.setText("No part pairs to review.")
             self.counts_label.setText("")
             self.primary.setText("Done ▸")
+            self.prev_btn.setEnabled(False)
             return
         (p, q), _ = self.pairs[self.i]
         states = [v.get("state", "None") for _, v in self.items[self.i]]
+        for s, part in zip(self.pair_swatches, (p, q)):
+            set_swatch(s, pastel_hex(part))
         self.pair_label.setText(f"Parts {p} ↔ {q} · {self.i + 1} / {len(self.pairs)}")
         self.counts_label.setText(f"Revolute {states.count('Revolute')} · Prismatic {states.count('Prismatic')}"
                                   f" · {len(states)} candidates")
         self.primary.setText("Done ▸" if self.i == len(self.pairs) - 1 else "Next pair ▸")
+        self.prev_btn.setEnabled(self.i > 0)  # the first pair has no previous one (no wrap-around)
 
     def on_theme(self) -> None:
         self._redraw_arrows()
@@ -448,7 +546,7 @@ class JointSelectScene(Scene):
 class ManualJointScene(Scene):
     """User study condition A: no suggestions. One X/Y/Z triad at a time starts at the world origin; keys
     and the gizmo move it as a whole, clicks set each arrow's type, and Confirm stores it for the chosen
-    parent/child pair."""
+    parent/child pair. Clicking a confirmed joint in the list brings its triad back for editing."""
     title = "Articulate · Manual joints"
     hint = "Pick parent and child, add a joint, move the triad, then click arrows: None → Revolute → Prismatic."
     controls = [("Click arrow", "cycle type")] + KEY_HINTS + [("G", "toggle gizmo"), ("R", "reset view"),
@@ -482,8 +580,10 @@ class ManualJointScene(Scene):
             arrow = state_arrow(np.asarray(v["center"], dtype=float), normalize(v["n"]), v["state"], self.size)
             self.arrows[arrow.actor] = v
             self.arrow_objs.append(arrow)
-        for joint in self.model.confirmed:
-            for v in joint["vectors"]:
+        for i, joint in enumerate(self.model.confirmed):
+            if i == self.model.editing:  # shown as the active triad instead
+                continue
+            for v in picked(joint["triad"]):
                 arrow = state_arrow(np.asarray(v["center"], dtype=float), normalize(v["n"]), v["state"], self.size)
                 self.arrow_objs.append(arrow.pickable(False).alpha(0.45))
         return self.arrow_objs
@@ -525,13 +625,35 @@ class ManualJointScene(Scene):
         if self.model.confirm():
             self._attach(None)
 
+    def _edit(self, i: int) -> None:
+        if self.model.edit(i):
+            self._sync_boxes()
+            self._recolor()
+            self._attach(VectorGroupTarget(self.model.triad, on_change=lambda d: self._redraw()))
+        else:
+            self._update_panel()  # undo the row's own check toggle
+
+    def _cancel(self) -> None:
+        if self.model.triad is not None:
+            self.model.cancel()
+            self._attach(None)
+
     def _remove(self, i: int) -> None:
-        self.model.remove(i)
-        self._changed()
+        if self.model.remove(i):
+            self._changed()
+
+    def _sync_boxes(self) -> None:
+        for key, box in self.boxes.items():
+            box.blockSignals(True)
+            box.setCurrentIndex(getattr(self.model, key) - 1)
+            box.blockSignals(False)
+            set_swatch(self.box_swatches[key], pastel_hex(getattr(self.model, key)))
 
     def _set_pair(self, *_) -> None:
         self.model.parent = self.boxes["parent"].currentData()
         self.model.child = self.boxes["child"].currentData()
+        for key, s in self.box_swatches.items():
+            set_swatch(s, pastel_hex(getattr(self.model, key)))
         self._recolor()
         self._update_panel()
         self._render()
@@ -543,24 +665,34 @@ class ManualJointScene(Scene):
     def widget(self) -> QWidget:
         w = QWidget()
         layout = _column(w)
+        layout.addWidget(section("Parts"))
+        layout.addLayout(part_legend(self.model.parts_num))
+        note = QLabel("The viewport colors only the parent and child; other parts are gray.", objectName="Muted")
+        note.setWordWrap(True)
+        layout.addWidget(note)
         layout.addWidget(section("Part pair"))
         grid = QGridLayout()
+        self.box_swatches = {}
         for row, key in enumerate(("parent", "child")):
             box = QComboBox()
             box.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # keep keyboard focus in the viewport
             for p in range(1, self.model.parts_num + 1):
-                box.addItem(f"Part {p}", p)
+                box.addItem(color_icon(pastel_hex(p)), f"Part {p}", p)
             box.setCurrentIndex(getattr(self.model, key) - 1)
             box.currentIndexChanged.connect(self._set_pair)
             self.boxes[key] = box
+            self.box_swatches[key] = swatch(pastel_hex(getattr(self.model, key)), 12)
             grid.addWidget(QLabel(key.capitalize()), row, 0)
-            grid.addWidget(box, row, 1)
+            grid.addWidget(self.box_swatches[key], row, 1)
+            grid.addWidget(box, row, 2)
+        grid.setColumnStretch(2, 1)
         layout.addLayout(grid)
         row = QHBoxLayout()
         self.new_btn = button("+ New joint", self._new)
         self.confirm_btn = button("Confirm joint", self._confirm)
-        row.addWidget(self.new_btn)
-        row.addWidget(self.confirm_btn)
+        self.cancel_btn = button("Cancel", self._cancel)
+        for b in (self.new_btn, self.confirm_btn, self.cancel_btn):
+            row.addWidget(b)
         layout.addLayout(row)
         layout.addWidget(section("Joints"))
         self.list_box = QVBoxLayout()
@@ -577,21 +709,15 @@ class ManualJointScene(Scene):
     def _update_panel(self) -> None:
         if self.list_box is None:
             return
-        self.new_btn.setEnabled(self.model.can_add())
-        self.confirm_btn.setEnabled(self.model.can_confirm())
-        while self.list_box.count():
-            self.list_box.takeAt(0).widget().deleteLater()
-        if not self.model.confirmed:
-            self.list_box.addWidget(QLabel("No joints yet.", objectName="Muted"))
-        for i, joint in enumerate(self.model.confirmed):
-            row = QWidget()
-            h = QHBoxLayout(row)
-            h.setContentsMargins(0, 0, 0, 0)
-            text = QLabel(ManualJoints.describe(joint))
-            text.setWordWrap(True)
-            h.addWidget(text, 1)
-            h.addWidget(button("✕", lambda i=i: self._remove(i)))
-            self.list_box.addWidget(row)
+        m = self.model
+        self.new_btn.setEnabled(m.can_add())
+        self.confirm_btn.setEnabled(m.can_confirm())
+        self.confirm_btn.setText("Confirm joint" if m.editing is None else "Update joint")
+        self.cancel_btn.setEnabled(m.triad is not None)
+        idle = m.triad is None
+        fill_joint_list(self.list_box, [(ManualJoints.describe(j), lambda i=i: self._edit(i), i == m.editing,
+                                         idle or i == m.editing, lambda i=i: self._remove(i))
+                                        for i, j in enumerate(m.confirmed)], "No joints yet.")
 
     def on_theme(self) -> None:
         self._redraw()

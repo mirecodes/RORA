@@ -1,0 +1,13 @@
+# User study P05. Run `scripts/run_tutorial.sh P05` first, then `scripts/run_study.sh P05`.
+# Design: cfgs/study/DESIGN.md. condition A = manual triad joints, B = suggested vectors.
+participant: P05
+objects_from: cfgs/dev/batch_set_cfg.yml
+trials:
+  # set 1: A (manual)
+  - {object: globe, condition: A}
+  - {object: folding_chair, condition: A}
+  - {object: lamp, condition: A}
+  # set 2: B (suggestion)
+  - {object: trashcan, condition: B}
+  - {object: safe, condition: B}
+  - {object: toaster, condition: B}
