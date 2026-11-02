@@ -2,6 +2,8 @@ from collections import Counter, defaultdict, deque
 
 import numpy as np
 import trimesh
+from scipy.sparse import coo_matrix
+from scipy.sparse.csgraph import dijkstra
 from scipy.spatial import cKDTree
 from trimesh.proximity import signed_distance
 
@@ -38,13 +40,16 @@ def k_hop(adj, seeds, max_hops: int = 5):
 # Vertex labeling
 # ---------------------------------------------------------------------
 def label_vertices(verts: np.ndarray,
+                   faces: np.ndarray,
                    parts: list[list[trimesh.Trimesh]],
                    use_signed_dist: bool = True,
                    sdf_thresh: float = 0.0,
                    batch_size: int = 50000,
                    k_vote: int = 3) -> np.ndarray:
     """Label each vertex with the part whose convex fragments contain it (-1 = none).
-    Leftover vertices take a k-nearest-labeled-neighbor majority vote (tie: smallest distance sum)."""
+    Leftover vertices take the label of the nearest labeled vertex along mesh edges (geodesic, so labels
+    never jump across gaps); those unreachable on the mesh take a k-nearest-labeled-neighbor majority vote
+    (tie: smallest distance sum)."""
     vert_label = -np.ones(len(verts), dtype=np.int32)
     best_sd = np.full(len(verts), np.inf, dtype=np.float32)
 
@@ -62,10 +67,24 @@ def label_vertices(verts: np.ndarray,
                     upd = pm.contains(verts[take]) & (vert_label[take] == -1)
                 vert_label[take[upd]] = pid
 
+    labeled = np.nonzero(vert_label >= 0)[0]
+    if labeled.size == 0 or labeled.size == len(verts):
+        return vert_label
+
+    # geodesic propagation: multi-source Dijkstra over edge lengths from every labeled vertex
+    e = np.unique(np.sort(faces[:, [0, 1, 1, 2, 2, 0]].reshape(-1, 2), axis=1), axis=0)
+    w = np.linalg.norm(verts[e[:, 0]] - verts[e[:, 1]], axis=1) + 1e-12  # 0 weight would read as no edge
+    graph = coo_matrix((w, (e[:, 0], e[:, 1])), shape=(len(verts),) * 2).tocsr()
+    dist, _, src = dijkstra(graph, directed=False, indices=labeled, min_only=True, return_predecessors=True)
+    reached = (vert_label == -1) & np.isfinite(dist)
+    vert_label[reached] = vert_label[src[reached]]
+
+    # kNN fallback for mesh components with no labeled vertex
     unlabeled = np.nonzero(vert_label == -1)[0]
     labeled = np.nonzero(vert_label >= 0)[0]
-    if unlabeled.size == 0 or labeled.size == 0:
+    if unlabeled.size == 0:
         return vert_label
+    print(f"[info] {unlabeled.size} vertices unreachable on the mesh; labeling them by kNN vote.")
 
     k = int(min(k_vote, labeled.size))
     dists, idxs = cKDTree(verts[labeled]).query(verts[unlabeled], k=k, workers=-1)

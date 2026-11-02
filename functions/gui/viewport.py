@@ -1,0 +1,343 @@
+"""The single 3D viewport: one vedo.Plotter embedded in Qt, scene mounting, text overlays, the view
+cube, the transform gizmo, and one mouse/key router (view cube -> gizmo -> scene -> camera)."""
+import sys
+
+import vtkmodules.qt
+
+vtkmodules.qt.PyQtImpl = "PySide6"  # must be set before importing QVTKRenderWindowInteractor
+vtkmodules.qt.QVTKRWIBase = "QOpenGLWidget"  # the default QWidget base hangs the event loop on macOS
+
+import vedo  # noqa: E402
+from PIL import Image  # noqa: E402
+from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget  # noqa: E402
+from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor  # noqa: E402
+from vtkmodules.util.numpy_support import vtk_to_numpy  # noqa: E402
+from vtkmodules.vtkRenderingCore import vtkPropPicker, vtkWindowToImageFilter  # noqa: E402
+
+from functions.gui import theme as th  # noqa: E402
+from functions.gui.gizmo import TransformGizmo  # noqa: E402
+from functions.gui.viewcube import HOME, ViewCube  # noqa: E402
+
+KEY_NAMES = {"Tab": "tab", "ISO_Left_Tab": "tab", "Return": "enter", "KP_Enter": "enter",
+             "space": "space", "Escape": "escape"}
+GUIDE_ROWS = 6        # key guide rows per column
+NAMED_KEYS = {"Space", "Enter", "Tab", "Esc"}
+# VTK's built-in overlay fonts have no glyphs for these; the Qt panel keeps the originals
+OVERLAY_ASCII = str.maketrans({"↔": "<->", "→": "->", "◂": "<", "▸": ">"})
+
+
+def _keys_cell(keys: str) -> QWidget:
+    """'W/S' -> two keycaps; mouse actions ('Drag', 'Left click') stay plain text."""
+    cell = QWidget()
+    row = QHBoxLayout(cell)
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(3)
+    parts = keys.split("/")
+    if not all(len(p) == 1 or p in NAMED_KEYS for p in parts):
+        row.addWidget(QLabel(keys, objectName="Mouse"))
+        return cell
+    for i, p in enumerate(parts):
+        if i:
+            row.addWidget(QLabel("/"))
+        row.addWidget(QLabel(p, objectName="Key", alignment=Qt.AlignmentFlag.AlignCenter))
+    row.addStretch()
+    return cell
+
+
+class KeyGuide(QFrame):
+    """Bottom-left table of a scene's controls, drawn by Qt above the GL view (not part of captures)."""
+
+    def __init__(self, parent):
+        super().__init__(parent, objectName="KeyGuide")
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.grid = QGridLayout(self)
+        self.grid.setContentsMargins(10, 8, 12, 8)
+        self.grid.setHorizontalSpacing(10)
+        self.grid.setVerticalSpacing(4)
+        self.controls = []
+        self.hide()
+
+    def set_controls(self, controls) -> None:
+        if list(controls) == self.controls:
+            return
+        self.controls = list(controls)
+        while self.grid.count():
+            self.grid.takeAt(0).widget().deleteLater()
+        for i, (keys, action) in enumerate(controls):
+            r, c = i % GUIDE_ROWS, 2 * (i // GUIDE_ROWS)
+            self.grid.addWidget(_keys_cell(keys), r, c)
+            self.grid.addWidget(QLabel(action.translate(OVERLAY_ASCII)), r, c + 1)
+            self.grid.setColumnMinimumWidth(c + 1, 96)
+        self.setVisible(bool(controls))
+        self.grid.activate()
+        self.adjustSize()
+        self.place()
+
+    def place(self) -> None:
+        parent = self.parentWidget()
+        self.move(12, parent.height() - self.height() - 12)
+        self.raise_()
+
+
+class _VTKWidget(QVTKRenderWindowInteractor):
+    """Keeps Tab inside the viewport instead of moving Qt focus."""
+
+    def focusNextPrevChild(self, next):  # noqa: N802 (Qt API name)
+        return False
+
+    def _getPixelRatio(self):  # noqa: N802 (VTK API name)
+        """Ratio of the screen this widget is on. VTK's version uses the screen under the mouse cursor,
+        which mis-sizes the render window when the app opens on another monitor."""
+        return self.devicePixelRatioF()
+
+
+class Viewport(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.vtk = _VTKWidget(self)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.vtk)
+
+        self.plt = vedo.Plotter(qt_widget=self.vtk, axes=0)
+        self.plt.show()
+        self.renderer = self.plt.renderer
+        self.iren = self.plt.interactor
+        for ev in ("KeyPressEvent", "KeyReleaseEvent", "CharEvent"):  # drop VTK/vedo default key bindings
+            self.iren.RemoveObservers(ev)
+
+        # Runs before the cube/gizmo sync: follow the current screen's pixel ratio (windows can move
+        # between a Retina display and a 1x monitor), otherwise text and the cube render at the wrong size.
+        self.renderer.AddObserver("StartEvent", self._sync_dpr, 100.0)
+        self.cube = ViewCube(self.renderer, self.plt.window, self.render, self.vtk.devicePixelRatioF())
+        self.gizmo = TransformGizmo(self.renderer, self.plt.window, self._on_gizmo_delta, self.render)
+        self.scene = None
+        self.actors = []
+        self.overlays = []
+        self.guide = KeyGuide(self)
+        self._picker = vtkPropPicker()
+        self.on_input = None  # study mode: (kind, detail) for every viewport mouse press (Recorder.log)
+        self._tags = {}
+        for ev, fn in (("LeftButtonPressEvent", self._left_press), ("LeftButtonReleaseEvent", self._left_release),
+                       ("RightButtonPressEvent", self._right_press), ("MiddleButtonPressEvent", self._middle_press),
+                       ("MouseMoveEvent", self._move), ("KeyPressEvent", self._key)):
+            self._tags[ev] = self.iren.AddObserver(ev, fn, 10.0)
+        self.cube.set_view(HOME)  # start in the same isometric view R returns to
+        self.apply_theme(th.current())
+
+    def _sync_dpr(self, *_) -> None:
+        dpr = self.vtk.devicePixelRatioF()
+        self.cube.dpr = dpr
+        if self.plt.window.GetDPI() != round(72 * dpr):
+            self.plt.window.SetDPI(round(72 * dpr))
+
+    # --- event routing ---
+    def _swallow(self, ev: str) -> None:
+        """Stop lower-priority observers (the camera interactor style) from seeing this event."""
+        self.iren.GetCommand(self._tags[ev]).SetAbortFlag(1)
+
+    def _report(self, kind: str, detail: str) -> None:
+        if self.on_input is not None:
+            self.on_input(kind, detail)
+
+    def _left_press(self, obj, ev):
+        x, y = self.iren.GetEventPosition()
+        if self.cube.on_press(x, y):
+            self._report("view", "cube")
+            self._swallow(ev)
+            return
+        if self.gizmo.on_press(x, y):
+            self._report("gizmo", "left")
+            self._swallow(ev)
+            return
+        self._report("axis" if self._pick(x, y, "left") else "view", "left")
+
+    def _left_release(self, obj, ev):
+        if self.gizmo.on_release():
+            self._swallow(ev)
+
+    def _right_press(self, obj, ev):
+        x, y = self.iren.GetEventPosition()
+        if self.cube.contains(x, y):
+            self._report("view", "cube")
+            self._swallow(ev)
+            return
+        self._report("axis" if self._pick(x, y, "right") else "view", "right")
+
+    def _middle_press(self, obj, ev):
+        self._report("view", "middle")
+
+    def _move(self, obj, ev):
+        x, y = self.iren.GetEventPosition()
+        if self.gizmo.on_move(x, y):
+            self._swallow(ev)
+            return
+        self.cube.on_move(x, y)
+
+    def _pick(self, x, y, button: str) -> bool:
+        if self.scene is not None and self._picker.Pick(x, y, 0, self.renderer):
+            return bool(self.scene.on_pick(self._picker.GetActor(), button))
+        return False
+
+    def _key(self, obj, ev):
+        sym = self.iren.GetKeySym() or ""
+        key = KEY_NAMES.get(sym, sym.lower())
+        if key == "r":
+            self.reset_view()
+        elif key == "g":
+            self.gizmo.toggle()
+            self.render()
+        elif key == "enter":
+            if self.scene is not None:
+                self.scene.on_enter()
+        elif self.scene is not None and self.scene.on_key(key):
+            self.render()
+
+    def _on_gizmo_delta(self, delta) -> None:
+        if self.scene is not None:
+            self.scene.apply(delta)
+            self.render()
+
+    # --- scene lifecycle ---
+    def mount(self, scene) -> None:
+        self.scene = scene
+        scene.viewport = self
+        self.set_actors(scene.build())
+        target = getattr(scene, "target", None)
+        self.gizmo.attach(target)
+        self.refresh_overlays()
+        self.suspend(False)
+        self.reset_view()
+        self.vtk.setFocus()
+
+    def unmount(self) -> None:
+        """Detach the scene; its actors stay as the last frame until the next mount."""
+        self.scene = None
+        self.gizmo.detach()
+        self.refresh_overlays()
+        self.render()
+
+    def set_actors(self, actors) -> None:
+        self.plt.clear()
+        self.actors = list(actors)
+        self.plt.add(*self.actors, *self.overlays)
+        self.render()
+
+    def refresh_overlays(self) -> None:
+        if self.overlays:
+            self.plt.remove(*self.overlays)
+        t, s = th.current(), self.scene
+        self.overlays = []
+        if s is not None and s.title:
+            text = (f"{s.title}\n{s.hint}" if s.hint else s.title).translate(OVERLAY_ASCII)
+            self.overlays.append(vedo.Text2D(text, pos="top-left", s=0.85, c=t.text, bg=t.panel,
+                                             alpha=0.85, font="Arial"))
+        self.guide.set_controls(s.controls if s is not None else [])
+        if self.overlays:
+            self.plt.add(*self.overlays)
+
+    def resizeEvent(self, event):  # noqa: N802 (Qt API name)
+        super().resizeEvent(event)
+        self.guide.place()
+
+    # --- capture ---
+    def capture(self, path: str) -> None:
+        """Save the current view as a centered square PNG, without the cube, gizmo, or text overlays."""
+        extras = (self.cube.ren, self.gizmo.ren)
+        for ren in extras:
+            ren.DrawOff()
+        if self.overlays:
+            self.plt.remove(*self.overlays)
+        try:
+            grab = vtkWindowToImageFilter()
+            grab.SetInput(self.plt.window)
+            grab.SetInputBufferTypeToRGB()
+            grab.ReadFrontBufferOff()
+            grab.Update()
+            img = grab.GetOutput()
+            w, h, _ = img.GetDimensions()
+            rgb = vtk_to_numpy(img.GetPointData().GetScalars()).reshape(h, w, 3)[::-1]
+        finally:
+            for ren in extras:
+                ren.DrawOn()
+            if self.overlays:
+                self.plt.add(*self.overlays)
+            self.render()
+        s = min(w, h)
+        x, y = (w - s) // 2, (h - s) // 2
+        Image.fromarray(rgb[y:y + s, x:x + s].copy()).save(path)
+
+    # --- view ---
+    def render(self) -> None:
+        self.plt.render()
+
+    def reset_view(self) -> None:
+        """Isometric Front-Right-Top view fitted to the scene."""
+        self.cube.set_view(HOME)
+        self.renderer.ResetCamera()
+        self.render()
+
+    def suspend(self, on: bool) -> None:
+        """Minimal mode: ignore input (and the renders it triggers) while stages compute."""
+        self.vtk.setEnabled(not on)
+
+    def apply_theme(self, t) -> None:
+        self.plt.background(t.vp_bottom, t.vp_top)
+        self.cube.set_theme(t)
+        self.gizmo.set_theme(t)
+        if self.scene is not None:
+            self.scene.on_theme()
+        self.refresh_overlays()
+        self.render()
+
+    def close_vtk(self) -> None:
+        self.vtk.Finalize()
+
+
+if __name__ == "__main__":
+    # Manual check: `.venv/bin/python -m functions.gui.viewport` (add --smoke to auto-quit after 1.5 s)
+    import numpy as np
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QApplication
+
+    from functions.gui.manip import AssemblyTarget
+
+    class _DemoScene:
+        title = "Viewport demo"
+        hint = "Drag gizmo arrows/rings; click the cube; R resets, G toggles the gizmo."
+        controls = [("Drag", "rotate"), ("Wheel", "zoom"), ("R", "reset view"), ("G", "toggle gizmo")]
+        viewport = None
+
+        def __init__(self):
+            self.target = AssemblyTarget(on_change=lambda d: self.mesh.apply_transform(vedo.LinearTransform(d)))
+
+        def build(self):
+            self.mesh = vedo.Cube(side=1.0).c(th.current().mesh).alpha(0.8)
+            return [self.mesh, vedo.Grid(s=(4, 4)).c(th.current().text3).alpha(0.2)]
+
+        def apply(self, delta):
+            self.target.apply(delta)
+
+        def on_key(self, key):
+            return False
+
+        def on_pick(self, actor, button):
+            print(f"pick {button}: {actor is self.mesh.actor}")
+
+        def on_enter(self):
+            print("enter; matrix:\n", np.round(self.target.matrix, 3))
+
+        def on_theme(self):
+            self.mesh.c(th.current().mesh)
+
+    app = QApplication(sys.argv[:1])
+    app.setStyleSheet(th.stylesheet(th.current()))
+    view = Viewport()
+    view.resize(1280, 720)
+    view.show()
+    view.mount(_DemoScene())
+    if "--smoke" in sys.argv:
+        QTimer.singleShot(1500, app.quit)
+    app.exec()
+    view.close_vtk()

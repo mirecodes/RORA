@@ -1,6 +1,3 @@
-import os
-import trimesh
-import vedo
 from typing import Dict, List, Tuple
 from collections import defaultdict
 
@@ -10,17 +7,15 @@ import pymeshlab
 from json_handler import JsonHandler
 from functions.math.geometry import normalize
 from functions.math.graph import adjacency
-from functions.math.patch import cycle_patch
 from functions.math.connection import fuse_connections, unicon_normal, merge_lines, plane_intersections
 from functions.math.axis_estimation import estimate_unicons
-from functions.utils.mesh import append_patches, save_link_meshes
-from functions.utils.urdf import generate_urdf, joints_from_bicons
+from functions.utils.urdf import joints_from_bicons, suggestions_from_bicons
+from functions.gui.bridge import ui
 from functions.visualize.plots import show_bicons
-from functions.visualize.select import select_joint_vectors
 
 
 # =============================================================================
-# Joint suggestion helpers (axis estimation, vectors, patches)
+# Joint suggestion helpers (axis estimation, vectors)
 # =============================================================================
 def compute_unicons(verts, faces, parts_num: int, adj, vert_label,
                     visualize_results: bool = False, **axis_kwargs) -> List[dict]:
@@ -43,10 +38,14 @@ def prepare_vectors_for_bicons(bicons: List[dict]) -> None:
         # Use the bicon normal computed in fuse_connections directly
         n_plane = np.asarray(bicon["normal"], dtype=float)
 
-        A = bicon['a']['single_plane']; B = bicon['b']['single_plane']
-        dA = float(A['plane'][0][1]) if A.get('plane') and len(A['plane']) > 0 else 0.0
-        dB = float(B['plane'][0][1]) if B.get('plane') and len(B['plane']) > 0 else 0.0
-        d_plane = 0.5 * (dA + dB)
+        # Plane offsets follow their normal's sign, so align each (n, d) to n_plane before averaging:
+        # antiparallel unicon planes (the usual i->j vs j->i case) would otherwise cancel d to ~0.
+        d_aligned = []
+        for side in ('a', 'b'):
+            plane = bicon[side]['single_plane'].get('plane')
+            if plane:
+                d_aligned.append(float(plane[0][1]) * (1.0 if np.dot(plane[0][0], n_plane) >= 0.0 else -1.0))
+        d_plane = float(np.mean(d_aligned)) if d_aligned else 0.0
 
         # 1. Add the main single-plane normal vector candidate (as list)
         bicon['vectors'] = [{
@@ -82,26 +81,6 @@ def prepare_vectors_for_bicons(bicons: List[dict]) -> None:
                 })
 
     print("[info] Vector preparation finished.")
-
-
-def build_extrapoints_and_patches(unicons: List[dict],
-                                  verts: np.ndarray):
-    """For each cycle: dense sampling + triangulated patch."""
-    print("[info] Building extra points and patches...")
-    patch_vertices: Dict[int, List[np.ndarray]] = defaultdict(list)
-    patch_faces: Dict[int, List[np.ndarray]] = defaultdict(list)
-    for unicon in unicons:
-        pid = int(unicon.get('src', 0))
-        cycle_idx = unicon.get('cycle', None)
-        if pid <= 0 or cycle_idx is None or len(cycle_idx) < 3:
-            continue
-        cycle_xyz = verts[np.asarray(cycle_idx, dtype=int)]
-        P3, F = cycle_patch(cycle_xyz, step_rel=0.03, sigma_scale=2.0, k_min=6)
-        if P3.size and F.size:
-            patch_vertices[pid].append(P3.astype(float))
-            patch_faces[pid].append(F.astype(np.int64))
-    print("[info] Patch building finished.")
-    return patch_vertices, patch_faces
 
 
 def append_unpaired_unicons(unicons: List[dict], bicons: List[dict], verts: np.ndarray) -> None:
@@ -266,45 +245,8 @@ def augment_vectors_for_pairs_with_map(bicons: List[dict], min_count: int = 2) -
     print("[info] Vector augmentation finished.")
 
 
-# =============================================================================
-# URDF
-# =============================================================================
-def urdf_transform(cfgs, states) -> np.ndarray | None:
-    """Inverse of the alignment (aligned -> original frame) if requested and available, else None."""
-    if not cfgs.urdf_use_original_coordinates:
-        print("[info]: Generating URDF in ALIGNED coordinate system.")
-        return None
-    try:
-        # states.transform.matrix maps original -> aligned; meshes/joints here are aligned, so invert it.
-        if hasattr(states, "transform") and hasattr(states.transform, "matrix"):
-            print("[info]: Generating URDF in ORIGINAL coordinate system (reverting alignment).")
-            return np.linalg.inv(np.array(states.transform.matrix))
-        print("[warn]: Transform matrix not found in states. Generating URDF in current (aligned) coordinates.")
-    except Exception as e:
-        print(f"[warn]: Failed to load/invert transform matrix: {e}. Generating URDF in current coordinates.")
-    return None
-
-
-# =============================================================================
-# Stage (entry point)
-# =============================================================================
-def stage_articulate(cfgs):
-    """
-    1) Load refined mesh + vertex labels (segment stage output)
-    2) Automatic Joint Suggestion: axis estimation (unicons) → bidirectional fusion (bicons) → vector candidates
-    3) Joint selection (UI)
-    4) Link meshes + patch fill, URDF generation
-    5) Persist states (states.articulate.*)
-    """
-    artCfgs = cfgs.params["articulate"]
-
-    print("=" * 60)
-    print("[info] Starting stage_articulate...")
-
-    # load states, refined mesh & vertex labels
-    print("[info] Loading states, base mesh and vertex labels...")
-    states = JsonHandler(cfgs.json_states_dir, auto_save=True)
-
+def load_segmented(states):
+    """(verts, faces, vert_label, parts_num): the refined mesh with the segment stage's vertex labels."""
     ms = pymeshlab.MeshSet()
     ms.load_new_mesh(states.refine.dirs.mesh)
     ms.set_current_mesh(0)
@@ -317,87 +259,85 @@ def stage_articulate(cfgs):
     if len(vert_label) != len(verts):
         raise RuntimeError(f"[error]: vert_label ({len(vert_label)}) does not match refined mesh ({len(verts)} verts). "
                            "Re-run the segment stage.")
+    return verts, faces, vert_label, parts_num
+
+
+def suggest_bicons(art_cfgs: dict, verts, faces, vert_label, parts_num: int, debug: bool = False,
+                   step=lambda key: None) -> List[dict]:
+    """Automatic joint suggestion: axis estimation (unicons) → bidirectional fusion (bicons) → vector
+    candidates on each bicon. `step(key)` reports the 'unicons' and 'fusion' sub-steps."""
     adj = adjacency(faces, len(verts))
 
-    # axis estimation + fusion + vectors
+    step("unicons")
     print("[info] Estimating unidirectional connections (unicons)...")
-    unicons = compute_unicons(
-        verts, faces, parts_num, adj, vert_label,
-        visualize_results=cfgs.debug_mode,
-        **artCfgs["axis_estimation"]
-    )
+    unicons = compute_unicons(verts, faces, parts_num, adj, vert_label, visualize_results=debug,
+                              **art_cfgs["axis_estimation"])
 
+    step("fusion")
     print("[info] Fusing unicons into bidirectional connections (bicons)...")
-    bicons = fuse_connections(unicons, **artCfgs["fusion"])
+    diag = float(np.linalg.norm(verts.max(axis=0) - verts.min(axis=0)))
+    bicons = fuse_connections(unicons, scale=diag, **art_cfgs["fusion"])
 
     # Visualizing the fusion details
-    if cfgs.debug_mode:
+    if debug:
         show_bicons(verts, faces, bicons)
 
-    if artCfgs["allow_unpaired_unicon"]:
+    if art_cfgs["allow_unpaired_unicon"]:
         append_unpaired_unicons(unicons, bicons, verts)
 
     print(f"[info]: len bicons {len(bicons)}")
 
     prepare_vectors_for_bicons(bicons)
-    augment_vectors_for_pairs_with_map(bicons, min_count=artCfgs["vector_augment_min_count"])  # optional
+    augment_vectors_for_pairs_with_map(bicons, min_count=art_cfgs["vector_augment_min_count"])  # optional
+    return bicons
 
-    # vector selection UI (part-pair-wise)
-    if cfgs.debug_mode:
-        print("=" * 60)
-        print("VECTOR SELECTION STAGE CONTROLS (Per Part-Pair Window):")
-        print("  Mouse:")
-        print("    Left Click on Vector : Toggle state (None -> Revolute -> Prismatic -> None)")
-        print("  Keyboard (Applies to ALL vectors in current window):")
-        print("    W / S     : Move along X axis")
-        print("    D / A     : Move along Y axis")
-        print("    Space / Z : Move along Z axis")
-        print("    N / B     : Rotate around X axis")
-        print("    H / J     : Rotate around Y axis")
-        print("    U / I     : Rotate around Z axis")
-        print("    Q / Esc   : Finish current window")
-        print("=" * 60)
 
+# =============================================================================
+# Stage (entry point)
+# =============================================================================
+def stage_articulate(cfgs):
+    """
+    1) Load refined mesh + vertex labels (segment stage output)
+    2) Automatic Joint Suggestion: axis estimation (unicons) → bidirectional fusion (bicons) → vector candidates
+    3) Joint selection (UI)
+    4) Persist states.articulate.{joints, suggestions}; the bind stage writes link meshes and URDFs from them
+    """
+    artCfgs = cfgs.params["articulate"]
+
+    print("=" * 60)
+    print("[info] Starting stage_articulate...")
+    ui().plan([("load", "Load", True), ("unicons", "Unicons", True), ("fusion", "Fusion", True),
+               ("vectors", "Vector selection", True), ("save", "Save", True)])
+    ui().step("load")
+
+    # load states, refined mesh & vertex labels
+    print("[info] Loading states, base mesh and vertex labels...")
+    states = JsonHandler(cfgs.json_states_dir, auto_save=True)
+    verts, faces, vert_label, parts_num = load_segmented(states)
+
+    # axis estimation + fusion + vectors
+    bicons = suggest_bicons(artCfgs, verts, faces, vert_label, parts_num, debug=cfgs.debug_mode, step=ui().step)
+    # Snapshot before selection: the selection UI moves/rotates the vectors in place (VectorGroupTarget),
+    # so the suggestions must be copied now to stay the automatic ones. tolist() makes plain copies.
+    suggestions = [{"pair": list(s["pair"]), "origin": s["origin"].tolist(), "n": s["n"].tolist(), "state": s["state"]}
+                   for s in suggestions_from_bicons(bicons)]
+
+    # vector selection in the viewport (all part pairs in one scene)
+    ui().step("vectors")
     print("[info] Starting interactive vector selection...")
-    select_joint_vectors(bicons, verts, faces, vert_label)
+    if bicons:
+        from functions.gui.scenes import JointSelectScene  # GUI-only import
+        ui().interact(JointSelectScene(bicons, verts, faces, vert_label))
     print("[info] Vector selection finished.")
     joints = joints_from_bicons(bicons)
 
-    # per-link meshes + patch fill
-    print("[info] Saving link meshes...")
-    link_dir = os.path.join(cfgs.mesh_working_dir, "links")
-    link_mesh_paths = save_link_meshes(verts, faces, vert_label, parts_num, link_dir)
-    patch_vertices, patch_faces = build_extrapoints_and_patches(unicons, verts)
-    append_patches(link_mesh_paths, patch_vertices, patch_faces)
-    print("[info] Link meshes saved.")
-
-    # persist states
+    # persist: everything the bind stage needs (JSON-safe), so a failure there never reruns this stage
+    ui().step("save")
     print("[info] Persisting states...")
     states.articulate = {}
-    states.articulate.dirs = {}
-    states.articulate.dirs.mesh = link_mesh_paths
     states.articulate.joints = joints
-    print("[info] States persisted.")
-
-    links: Dict[int, trimesh.Trimesh] = {int(k): trimesh.load(p, process=False) for k, p in link_mesh_paths.items()}
-    if not links:
-        print("[error]: No link meshes were generated.")
-        return
-
-    # Generate URDF File (urdf_name / density / mesh_fmt from parameters_cfg.yml)
-    urdf_dir = generate_urdf(
-        closed_parts=links,
-        joints=joints,
-        out_dir=cfgs.urdf_out_dir,
-        transform_matrix=urdf_transform(cfgs, states),
-        **artCfgs["urdf"]
-    )
-    print(f"[info]: the urdf file has been generated in: {urdf_dir}")
-
-    # Vedo viewer of the articulated object
-    if cfgs.debug_mode:
-        actors = [vedo.Mesh([m.vertices, m.faces]).c('lightblue').alpha(0.5) for _, m in sorted(links.items())]
-        vedo.show(actors, "Loaded link meshes", axes=1).close()
+    states.articulate.suggestions = suggestions
+    print(f"[info] States persisted: {len(joints)} joints, {len(suggestions)} suggestions.")
 
     print("[info] stage_articulate finished successfully.")
     print("=" * 60)

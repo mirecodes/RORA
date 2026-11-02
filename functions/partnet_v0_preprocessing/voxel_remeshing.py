@@ -19,9 +19,11 @@ def merge_urdf_voxel_ply(urdf_path, joint_cfg, output_path="fused_voxel.ply", vo
     print(f"[Info] Loading URDF: {urdf_path}")
     robot = URDF.load(urdf_path)
 
-    # 1. Apply configuration (deg -> rad)
-    joint_cfg_rad = {k: np.deg2rad(float(v)) for k, v in joint_cfg.items()}
-    valid_cfg = {k: v for k, v in joint_cfg_rad.items() if k in robot.actuated_joint_names}
+    # 1. Apply configuration (revolute/continuous: deg -> rad, prismatic: meters as-is)
+    valid_cfg = {
+        k: np.deg2rad(float(v)) if robot.joint_map[k].type in ("revolute", "continuous") else float(v)
+        for k, v in joint_cfg.items() if k in robot.actuated_joint_names
+    }
     robot.update_cfg(configuration=valid_cfg)
 
 
@@ -117,6 +119,11 @@ def merge_urdf_voxel_ply(urdf_path, joint_cfg, output_path="fused_voxel.ply", vo
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         final_mesh.export(output_path, file_type='ply', encoding='binary')
         print(f"[Info] Saved: {output_path}")
+
+        # Same remeshed mesh as GLB
+        glb_path = os.path.splitext(output_path)[0] + ".glb"
+        final_mesh.export(glb_path)
+        print(f"[Info] Saved: {glb_path}")
         return final_mesh
 
     except Exception as e:
@@ -140,10 +147,13 @@ if __name__ == "__main__":
 
         urdf_path = os.path.join(INPUT_DIR, object_name, "mobility.urdf")
         output_path = os.path.join(OUTPUT_DIR, object_name, "mesh.ply")
-        joint_cfg = (objects[object_name] or {}).get("joint_offset") or {}
+        object_cfg = objects[object_name] or {}
+        joint_cfg = object_cfg.get("joint_offset") or {}
+        # Per-object `voxel` keys override the global `voxel` defaults
+        object_voxel = {**voxel, **(object_cfg.get("voxel") or {})}
 
         if os.path.exists(urdf_path):
             merge_urdf_voxel_ply(urdf_path, joint_cfg, output_path,
-                                 voxel_pitch=voxel["pitch"], rotation_deg=voxel["rotation_deg"])
+                                 voxel_pitch=object_voxel["pitch"], rotation_deg=object_voxel["rotation_deg"])
         else:
             print(f"[Error] URDF file not found: {urdf_path}")

@@ -1,0 +1,34 @@
+# Dev: object pool for scripts/dev/random_run_pipeline.sh (e.g. user studies).
+# counts: objects drawn per category, in the order listed under `objects` (CLI `run 1,1,0` overrides).
+# seed: null draws a new set each run; the seed used is printed, so a draw can be repeated (CLI `run 1,1,0 <seed>`).
+# parts / object_profile: as in batch_set_cfg.yml.
+# start_stage: the GUI runs this stage and the ones after it (earlier stage switches are turned off for the session);
+#   the earlier stages' results come from working/<source>/<object>/, copied over working/<object>/ before the GUI opens.
+# source: the archived session (working/dev/<date_time>/) of the 2026-10-29 batch run that made the object profile.
+counts: [1, 1, 0]
+seed: null
+start_stage: segment
+defaults:
+  extension: ply
+  profile: partnet_object
+
+objects:
+  cat1:
+    bucket: {parts: 2, object_profile: bucket_20261029_015825, source: dev/20261029_021529}
+    fan: {parts: 2, object_profile: fan_20261029_022019, source: dev/20261029_021529}
+    globe: {parts: 2, object_profile: globe_20261029_023152, source: dev/20261029_022647}
+    microwave: {parts: 2, object_profile: microwave_20261029_023442, source: dev/20261029_022647}
+    trashcan: {parts: 2, object_profile: trashcan_20261029_023658, source: dev/20261029_023506}
+    usb: {parts: 2, object_profile: usb_20261029_024902, source: dev/20261029_024707}
+  cat2:
+    box: {parts: 5, object_profile: box_20261029_025735, source: dev/20261029_024707}
+    faucet: {parts: 4, object_profile: faucet_20261029_025923, source: dev/20261029_024707}
+    # folding_chair: {parts: 3, object_profile: null, source: dev/20261029_030504}
+    refrigerator: {parts: 3, object_profile: refrigerator_20261029_031538, source: dev/20261029_030504}
+    toaster: {parts: 3, object_profile: toaster_20261029_032207, source: dev/20261029_030504}
+    # toilet: {parts: 4, object_profile: toilet_20261029_034243, source: dev/20261029_032758}
+  cat3:
+    dispenser: {parts: 4, object_profile: dispenser_20261029_040319, source: dev/20261029_035025}
+    lamp: {parts: 4, object_profile: null, source: dev/20261029_041348}    # no profile saved in that run
+    safe: {parts: 3, object_profile: safe_20261029_042525, source: dev/20261029_041348}
+    stapler: {parts: 3, object_profile: stapler_20261029_042732, source: dev/20261029_041348}

@@ -1,5 +1,6 @@
 import os
 
+import manifold3d
 import numpy as np
 import pymeshlab
 import trimesh
@@ -113,31 +114,35 @@ def submesh(verts: np.ndarray, faces: np.ndarray, labels: np.ndarray, k: int):
     return verts[vidx], vmap[faces_k]
 
 
-def save_link_meshes(verts, faces, labels, parts_num: int, out_dir: str) -> dict[str, str]:
-    """Save out_dir/link_<k>.ply per label k. Returns {str(k): path}."""
+def close_link(verts, faces, close_holes: dict, fragment_paths: list[str] | None) -> trimesh.Trimesh:
+    """Watertight link: pymeshlab hole closing, else the union of the part's decompose-stage CoACD fragments."""
+    ms = pymeshlab.MeshSet()
+    ms.add_mesh(pymeshlab.Mesh(vertex_matrix=verts, face_matrix=faces))
+    ms.meshing_close_holes(**close_holes)
+    closed = to_trimesh(ms)
+    if closed.is_watertight:
+        return closed
+    if not fragment_paths:
+        raise RuntimeError("[error]: link is still open after hole closing and states.segment.dirs.fragments "
+                           "is missing. Re-run the segment stage.")
+    print("[warn] Hole closing left the link open; using the union of its CoACD fragments instead.")
+    hulls = [(f.vertices, f.faces) for f in (trimesh.load(p, process=False) for p in fragment_paths)]
+    union = manifold3d.Manifold.batch_boolean(
+        [manifold3d.Manifold(manifold3d.Mesh(vert_properties=np.asarray(v, np.float32),
+                                             tri_verts=np.asarray(f, np.uint32))) for v, f in hulls],
+        manifold3d.OpType.Add).to_mesh()
+    return trimesh.Trimesh(vertices=union.vert_properties[:, :3], faces=union.tri_verts)
+
+
+def save_link_meshes(verts, faces, labels, parts_num: int, out_dir: str,
+                     close_holes: dict, fragments: dict | None) -> dict[str, str]:
+    """Save out_dir/link_<k>.ply per label k, closed by close_link. fragments: {str(k): [fragment paths]}
+    (states.segment.dirs.fragments; None for states saved before it existed). Returns {str(k): path}."""
     os.makedirs(out_dir, exist_ok=True)
     paths = {}
     for k in range(1, parts_num + 1):
         sv, sf = submesh(verts, faces, labels, k)
         if sv is not None:
             paths[str(k)] = os.path.join(out_dir, f"link_{k}.ply")
-            trimesh.Trimesh(vertices=sv, faces=sf, process=False).export(paths[str(k)])
+            close_link(sv, sf, close_holes, (fragments or {}).get(str(k))).export(paths[str(k)])
     return paths
-
-
-def append_patches(mesh_paths: dict[str, str], patch_vertices: dict, patch_faces: dict) -> None:
-    """Append patches {k: [(P, F), ...]} to the link mesh files in place."""
-    for k_str, path in mesh_paths.items():
-        k = int(k_str)
-        if not patch_vertices.get(k):
-            continue
-        tm = trimesh.load(path, process=False)
-        V, F = tm.vertices, tm.faces
-        for P, Ft in zip(patch_vertices[k], patch_faces[k]):
-            if P.size and Ft.size:
-                F = np.vstack([F, Ft + len(V)])
-                V = np.vstack([V, P])
-        out = trimesh.Trimesh(vertices=V, faces=F, process=False)
-        out.update_faces(out.unique_faces() & out.nondegenerate_faces())
-        out.remove_unreferenced_vertices()
-        out.export(path)

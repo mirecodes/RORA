@@ -1,0 +1,11 @@
+# Tutorial for P01: `scripts/run_tutorial.sh P01`, before `scripts/run_study.sh P01`. Skip ▸▸ (top right) drops a trial.
+# One object per category, none of P01's test objects; each object A (manual) then B (suggestion). Design: cfgs/study/DESIGN.md.
+participant: P01_tutorial
+objects_from: cfgs/dev/batch_set_cfg.yml
+trials:
+  - {object: trashcan, condition: A}
+  - {object: trashcan, condition: B}
+  - {object: toaster, condition: A}
+  - {object: toaster, condition: B}
+  - {object: stapler, condition: A}
+  - {object: stapler, condition: B}

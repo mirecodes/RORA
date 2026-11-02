@@ -91,11 +91,12 @@ def train_multi_plane(verts, idx_pos, idx_neg, K: int = 2, max_iter: int = 20, C
         W, b = init_weights(bd)
         assign_pos = assign_neg = [np.array([], dtype=int)] * K
         for _ in range(max_iter):
-            # E-step. convex : every positive in all planes, each negative to its highest-scoring plane.
-            #         concave: each positive to its highest-scoring plane, every negative in all planes.
+            # E-step (raw scores f_j(x) = w_j.x + b_j, no label sign applied).
+            #   convex  (positive iff min_j f_j > 0): each negative to the plane rejecting it most (argmin).
+            #   concave (positive iff max_j f_j > 0): each positive to the plane accepting it most (argmax).
             if bd == "convex":
                 new_pos = [np.arange(len(Xp_s))] * K
-                j_neg = np.argmax(Xn_s @ W.T + b, axis=1)
+                j_neg = np.argmin(Xn_s @ W.T + b, axis=1)
                 new_neg = [np.nonzero(j_neg == j)[0] for j in range(K)]
             else:
                 j_pos = np.argmax(Xp_s @ W.T + b, axis=1)

@@ -4,10 +4,10 @@ Builds an articulated **URDF** and **per-part Gaussians** from a mesh (`mesh.ply
 
 ```
 align → refine → decompose → segment → articulate → bind
-align    clean     convex      part        joint       Gaussian
-         mesh      decomp.     grouping +  suggestion  binding
-                               vertex      + selection
-                               labels      + URDF
+align    clean     convex      part        joint       watertight links
+         mesh      decomp.     grouping +  suggestion  + URDF
+                               vertex      + selection + Gaussian
+                               labels                  binding
 ```
 
 ## 1. Install
@@ -65,11 +65,15 @@ profile: real_object        # real_object (real scan) | partnet_object (PartNet 
 | Key | Description |
 |---|---|
 | `pipeline.stages.*` | Stage on/off. A stage can be skipped if its result is in `working/`. |
-| `pipeline.debug_mode` | Show intermediate results in a viewer. |
+| `pipeline.debug_mode` | Pause at intermediate results in the viewport (ignored with `--minimal`). |
 | `refine.method` | `pymeshlab` (default) or `point2mesh`. |
 | `decompose.coacd.threshold` | Lower = finer decomposition. |
+| `bind.close_holes` | Hole closing per link mesh; a link still open becomes the union of its own CoACD parts (`decompose.coacd`). |
+| `bind.suggestion_urdf` | Also write every suggested joint vector, before human selection, to `working/<object>/urdf/` (evaluation `suggest`). |
 
 `cfgs/profiles/<profile>_params_cfg.yml` overrides `parameters_cfg.yml`, only for the keys it lists.
+An object profile saved from the GUI (`object_cfg.yml: object_profile`, stored in `cfgs/profiles/objects/`)
+is applied last and holds every stage setting for that object.
 
 ## 4. Run the pipeline
 
@@ -77,37 +81,58 @@ profile: real_object        # real_object (real scan) | partnet_object (PartNet 
 source .venv/bin/activate
 bash scripts/run_pipeline.sh
 # same as
-python functions/pipeline/interface.py
+python -m functions.gui.app
 ```
 
-Some stages open interactive GUI windows. Controls are also printed in the terminal.
+The pipeline runs in one window: a 3D viewport on the left, and on the right the stage timeline,
+the current interaction, the parameters, and the log. Press **▶ Run** to run the enabled stages.
+Hover a stage to **↻ re-run** it or **▶ run from** it; edit parameters first to re-run with new values.
+**Save object profile** writes every stage setting for this object to
+`cfgs/profiles/objects/<object>_<date>_<time>.yml` (shared yml files are never changed).
 
-- **align**: orient the object Z-up.
-  Rotate Z/Y/X: `U/I`, `H/J`, `B/N`. Move X/Y/Z: `W/S`, `D/A`, `Space/Z`. Save: `Q` or `Esc`.
-- **segment (parts)**: group convex fragments into parts.
-  `Tab` switches part, left click assigns, right click unassigns. Next: `Q` or `Esc`.
-- **articulate (joint axis)**: click an arrow to pick the joint type. Once = yellow (revolute), twice = blue (prismatic).
+- **align**: seat the object on z = 0 with Front along +X. Rotate X/Y/Z: `←/→`, `↑/↓`, `Q/E`.
+  Move X/Y/Z: `W/S`, `D/A`, `Space/Z`. Or drag the gizmo, or type values in the panel. `Enter`: done.
+- **segment (parts)**: pick a part chip (or `Tab`), left click assigns a fragment, right click reverts.
+- **articulate (joint axis)**: click an arrow to cycle None → Revolute (amber) → Prismatic (blue);
+  `Enter` / **Next pair** moves through the part pairs.
+- Everywhere: the view cube (top right) snaps the camera to a face, edge, or corner; `R` resets the view,
+  `G` toggles the gizmo.
+
+`bash scripts/run_pipeline.sh --minimal` skips debug pauses and live rendering for timing runs.
 
 ### Output
 
 ```
 export/<object_name>/
+├── timing.yml                 # same as working/.../timing.yml (see below)
 ├── urdf/
 │   ├── object.urdf
 │   └── meshes/link_*.stl
 └── gaussian/gaussian_*.ply    # per-part Gaussians
 working/<object_name>/
-├── meshes/                    # refined mesh, fragment_*.ply (decompose), links/link_*.ply (articulate)
+├── meshes/                    # refined mesh, fragment_*.ply (decompose), links/link_*.ply (bind, watertight)
+├── urdf/                      # bind.suggestion_urdf: links fixed to base, one suggest_<a>_<b>_<k> joint per candidate
+│   ├── object.urdf
+│   └── meshes/link_*.stl
 └── attributes/
-    ├── states.json            # paths and per-stage results
+    ├── states.json            # paths and per-stage results (articulate.joints/suggestions feed bind)
     └── vert_label.npy         # per-vertex part labels of the refined mesh (segment → articulate, bind)
 ```
 
-Per-stage timings are printed at the end.
+Per-stage and per-step timings are printed at the end and saved to `working/<object_name>/attributes/timing.yml`
+and `export/<object_name>/timing.yml` (each run overwrites both; the dev runs in section 6 keep a copy per run):
+
+| Column | Meaning |
+|---|---|
+| `interact` | the user working in a scene (align, part selection, joint selection) |
+| `wait` | a debug checkpoint open until **Continue** (none with `--minimal` or `debug_mode: false`) |
+| `compute` | `wall - interact - wait` |
+| `wall` | elapsed time |
 
 ### Example: rerun some stages
 
-To redo only part segmentation, set `cfgs/parameters_cfg.yml`:
+In the GUI, untick stages in the timeline or use ↻ / ▶ on a stage. Without the GUI checkboxes, set
+`cfgs/parameters_cfg.yml` to redo only part segmentation:
 
 ```yaml
 pipeline:
@@ -132,6 +157,7 @@ Merges the part meshes of a PartNet-Mobility URDF, posed by joint offsets, into 
 data/preprocess/partnet_v0/<name>/mobility.urdf          (input)
         │  apply joint offsets → merge part meshes
         ├─ voxel    → data/objects/<name>/mesh.ply        (pipeline input)
+        │             data/objects/<name>/mesh.glb        (same remeshed mesh)
         └─ manifold → data/objects/<name>/mesh_fused.ply  (reference)
 ```
 
@@ -185,3 +211,57 @@ bash scripts/preprocess_partnet.sh all        # both
    profile: partnet_object   # clean mesh: disables Poisson, floor cut, etc. in refine
    ```
 3. Run `bash scripts/run_pipeline.sh`.
+
+## 6. Dev: batch and random runs
+
+Development options, not part of the normal pipeline. They run the GUI over a list of objects to rebuild a
+test set or to pick objects for a user study. Each list is one yml file that holds, per object, its name,
+parts count, and object profile.
+
+| Mode | Script | Object list | Runs |
+|---|---|---|---|
+| batch | `scripts/dev/batch_run_pipeline.sh` | `cfgs/dev/batch_set_cfg.yml` | the listed objects in order |
+| random | `scripts/dev/random_run_pipeline.sh` | `cfgs/dev/random_set_cfg.yml` | `counts` random objects per category, in shuffled order |
+
+```yaml
+counts: [1, 1, 0]        # random only: 1 from cat1, 1 from cat2, 0 from cat3
+seed: null               # random only: null = new draw each run
+defaults: {extension: ply, profile: partnet_object}
+objects:
+  cat1:
+    globe: {parts: 2, object_profile: null}   # object_profile is filled in by the run
+```
+
+```bash
+source .venv/bin/activate
+bash scripts/dev/batch_run_pipeline.sh               # all objects in order
+bash scripts/dev/batch_run_pipeline.sh cat2          # one category or one object
+bash scripts/dev/random_run_pipeline.sh              # counts / seed from the yml
+bash scripts/dev/random_run_pipeline.sh run 1,1,0 7  # override counts and seed
+bash scripts/dev/batch_run_pipeline.sh status        # check every object's inputs and outputs
+```
+
+- **run** points `cfgs/object_cfg.yml` at each object (name, parts, profile, object profile) and opens the GUI.
+  With several objects it asks first: `Enter` run, `s` skip, `q` quit. `object_cfg.yml` is restored at the end.
+- After each object, also when the run is cut off with `Ctrl-C`, the run saves that object right away:
+  - the object profile you saved in the GUI (and its parts count) is written back to the yml;
+  - `working/<object>/` and `export/<object>/` are copied to `working/dev/<date_time>/<object>/` and
+    `export/dev/<date_time>/<object>/`, one `<date_time>` per script run. Objects whose pipeline never ran in the
+    GUI are not copied.
+
+  ```
+  export/dev/20261029_143000/
+  ├── session.yml                # mode, counts / seed (random), objects in run order
+  ├── batch_set_cfg.yml          # the yml as of the last saved object (parts, object profiles)
+  ├── bucket/                    # export/bucket/ at the end of its run: urdf/, gaussian/, timing.yml
+  └── faucet/
+  working/dev/20261029_143000/
+  ├── bucket/                    # working/bucket/: meshes/, urdf/ (suggestion URDF), attributes/
+  └── faucet/
+  ```
+- **random** prints the drawn objects and the seed (`counts 1,1,0 seed 7: cat1/globe, cat2/faucet`);
+  `run 1,1,0 7` repeats that draw, e.g. to reproduce what a study participant saw.
+- **status** prints one line per object: input files, object profile, URDF (parts / moving joints, date),
+  per-part Gaussians, and the suggestion URDF. URDF and Gaussian counts must match `parts`. Exits 1 if any object
+  is incomplete. It reads the live `export/<object>/` and `working/<object>/`, not a `dev/<date_time>/` copy.
+  Check the dates to tell a new run from an old export.

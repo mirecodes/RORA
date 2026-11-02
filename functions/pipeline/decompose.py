@@ -6,8 +6,12 @@ import trimesh
 
 from json_handler import JsonHandler
 
+from functions.gui.bridge import ui
+
 
 def stage_decompose(cfgs):
+    ui().plan([("load", "Load", True), ("coacd", "CoACD", True), ("save", "Save fragments", True)])
+    ui().step("load")
     states = JsonHandler(cfgs.json_states_dir, auto_save=True)
 
     # Load mesh data
@@ -26,9 +30,11 @@ def stage_decompose(cfgs):
     print(f"[info] Running CoACD with parameters: {params}")
 
     # Run convex decomposition
+    ui().step("coacd")
     fragments = coacd.run_coacd(mesh, **params)
 
     # Save intermediate state into the json file
+    ui().step("save")
     states.decompose = {}
     states.decompose.length = len(fragments)
     states.decompose.dirs = {

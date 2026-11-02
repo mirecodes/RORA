@@ -1,0 +1,11 @@
+# Tutorial for P14: `scripts/run_tutorial.sh P14`, before `scripts/run_study.sh P14`. Skip ▸▸ (top right) drops a trial.
+# One object per category, none of P14's test objects; each object A (manual) then B (suggestion). Design: cfgs/study/DESIGN.md.
+participant: P14_tutorial
+objects_from: cfgs/dev/batch_set_cfg.yml
+trials:
+  - {object: usb, condition: A}
+  - {object: usb, condition: B}
+  - {object: toaster, condition: A}
+  - {object: toaster, condition: B}
+  - {object: safe, condition: A}
+  - {object: safe, condition: B}
