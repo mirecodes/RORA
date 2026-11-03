@@ -4,10 +4,8 @@ participant: P08
 objects_from: cfgs/dev/batch_set_cfg.yml
 trials:
   # set 1: B (suggestion)
-  - {object: toilet, condition: B}
-  - {object: usb, condition: B}
-  - {object: stapler, condition: B}
+  - {object: toilet, condition: B}  # cat2
+  - {object: usb, condition: B}  # cat1
   # set 2: A (manual)
-  - {object: refrigerator, condition: A}
-  - {object: safe, condition: A}
-  - {object: microwave, condition: A}
+  - {object: microwave, condition: A}  # cat1
+  - {object: refrigerator, condition: A}  # cat2

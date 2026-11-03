@@ -1,13 +1,13 @@
 # User study procedure
 
 One session per participant `Pxx` (P01–P15), in three chapters: **1. Video → 2. Tutorial → 3. Main study**.
-Which objects each participant gets, and why, is in [DESIGN.md](DESIGN.md).
+Which objects each participant gets, and why, is in [DESIGN.md](cfgs/study/DESIGN.md).
 
 | Chapter | What | Command | Objects |
 |---|---|---|---|
 | 1 | Video on how the system works | — | — |
-| 2 | Tutorial (practice, skippable) | `scripts/run_tutorial.sh Pxx` | 3 (cat1, cat2, cat3) × A, B |
-| 3 | Main study (recorded) | `scripts/run_study.sh Pxx` | 6 (one set of 3 per condition) |
+| 2 | Tutorial (practice, skippable) | `scripts/run_tutorial.sh Pxx` | 2 (the participant's two categories) × A, B |
+| 3 | Main study (recorded) | `scripts/run_study.sh Pxx` | 4 (2 per condition, from two different categories) |
 
 Conditions: **A = manual joints** (the participant places each joint with an X/Y/Z triad),
 **B = suggestion-based joints** (the participant picks among suggested joint vectors).
@@ -26,8 +26,8 @@ Conditions: **A = manual joints** (the participant places each joint with an X/Y
   ```
 
 - Each number has a fixed set of objects and a fixed condition order (see the schedule in
-  [DESIGN.md](DESIGN.md)). Only when all 15 numbers are completed is every object tested equally often
-  (3 × A, 3 × B), so do not skip numbers or reorder them.
+  [DESIGN.md](cfgs/study/DESIGN.md)). Only when all 15 numbers are completed is every object tested
+  equally often (2 × A, 2 × B), so do not skip numbers or reorder them.
 - If a participant drops out or their data cannot be used, give the next new participant the **same**
   number and run the full session again. Keep the old `export/study/Pxx_<date_time>/` folder, but note
   it as excluded.
@@ -52,9 +52,9 @@ and the controls.
 scripts/run_tutorial.sh Pxx
 ```
 
-- **Content:** 3 objects, one each from cat1, cat2 and cat3. Each object is done in condition A and
-  then B, so the order is `obj1 A → obj1 B → obj2 A → obj2 B → obj3 A → obj3 B`. None of the tutorial
-  objects come up again in the participant's main study.
+- **Content:** 2 objects, one from each of the two categories the participant gets in the main study.
+  Each object is done in condition A and then B, so the order is `obj1 A → obj1 B → obj2 A → obj2 B`.
+  None of the tutorial objects come up again in the participant's main study.
 - **Before each object:** load that object in the URDF viewer and let the participant move its joints
   until they understand how it is articulated.
 - **Concept help:** if the participant is not clear on links (parent/child) or joints, explain as
@@ -74,8 +74,9 @@ scripts/run_tutorial.sh Pxx
 scripts/run_study.sh Pxx
 ```
 
-- **Content:** 6 objects in two sets of 3. One set uses condition A and the other B; the order (A→B or
-  B→A) depends on the participant. There is no Skip button.
+- **Content:** 4 objects in two sets of 2. One set uses condition A and the other B; the order (A→B or
+  B→A) depends on the participant. The two objects in a set come from different categories, and both sets
+  use the same two categories. There is no Skip button.
 - **Before each object:** as in the tutorial, let the participant explore the object in the URDF viewer,
   and explain links and joints if they need it.
 - **Running a trial:** wait for *Ready*, then press **▶ Start**. The trial is timed from Start until the
@@ -110,7 +111,7 @@ scripts/run_study.sh Pxx
 
   2. Open `P01_1.yml`. Under `trials:`, delete the object lines **before** the trial where the error
      happened. Keep that trial and everything after it. For example, if the error happened during the
-     5th trial, delete the first 4 `- {object: ..., condition: ...}` lines.
+     3rd trial, delete the first 2 `- {object: ..., condition: ...}` lines.
   3. Run the copy. Give the full path, because `scripts/run_study.sh P01_1` does not look inside the
      `P01/` folder:
 

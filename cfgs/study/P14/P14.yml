@@ -4,10 +4,8 @@ participant: P14
 objects_from: cfgs/dev/batch_set_cfg.yml
 trials:
   # set 1: B (suggestion)
-  - {object: lamp, condition: B}
-  - {object: faucet, condition: B}
-  - {object: globe, condition: B}
+  - {object: lamp, condition: B}  # cat3
+  - {object: faucet, condition: B}  # cat2
   # set 2: A (manual)
-  - {object: stapler, condition: A}
-  - {object: bucket, condition: A}
-  - {object: toilet, condition: A}
+  - {object: toilet, condition: A}  # cat2
+  - {object: stapler, condition: A}  # cat3

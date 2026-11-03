@@ -4,10 +4,8 @@ participant: P06
 objects_from: cfgs/dev/batch_set_cfg.yml
 trials:
   # set 1: B (suggestion)
-  - {object: usb, condition: B}
-  - {object: toaster, condition: B}
-  - {object: trashcan, condition: B}
+  - {object: toaster, condition: B}  # cat2
+  - {object: trashcan, condition: B}  # cat1
   # set 2: A (manual)
-  - {object: microwave, condition: A}
-  - {object: globe, condition: A}
-  - {object: folding_chair, condition: A}
+  - {object: globe, condition: A}  # cat1
+  - {object: folding_chair, condition: A}  # cat2

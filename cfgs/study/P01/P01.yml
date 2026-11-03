@@ -4,10 +4,8 @@ participant: P01
 objects_from: cfgs/dev/batch_set_cfg.yml
 trials:
   # set 1: A (manual)
-  - {object: bucket, condition: A}
-  - {object: box, condition: A}
-  - {object: fan, condition: A}
+  - {object: bucket, condition: A}  # cat1
+  - {object: box, condition: A}  # cat2
   # set 2: B (suggestion)
-  - {object: globe, condition: B}
-  - {object: microwave, condition: B}
-  - {object: folding_chair, condition: B}
+  - {object: folding_chair, condition: B}  # cat2
+  - {object: globe, condition: B}  # cat1

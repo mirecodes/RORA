@@ -4,10 +4,8 @@ participant: P10
 objects_from: cfgs/dev/batch_set_cfg.yml
 trials:
   # set 1: B (suggestion)
-  - {object: stapler, condition: B}
-  - {object: box, condition: B}
-  - {object: bucket, condition: B}
+  - {object: bucket, condition: B}  # cat1
+  - {object: stapler, condition: B}  # cat3
   # set 2: A (manual)
-  - {object: safe, condition: A}
-  - {object: trashcan, condition: A}
-  - {object: toaster, condition: A}
+  - {object: safe, condition: A}  # cat3
+  - {object: trashcan, condition: A}  # cat1

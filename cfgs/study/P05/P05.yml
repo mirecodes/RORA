@@ -4,10 +4,8 @@ participant: P05
 objects_from: cfgs/dev/batch_set_cfg.yml
 trials:
   # set 1: A (manual)
-  - {object: globe, condition: A}
-  - {object: folding_chair, condition: A}
-  - {object: lamp, condition: A}
+  - {object: lamp, condition: A}  # cat3
+  - {object: globe, condition: A}  # cat1
   # set 2: B (suggestion)
-  - {object: trashcan, condition: B}
-  - {object: safe, condition: B}
-  - {object: toaster, condition: B}
+  - {object: trashcan, condition: B}  # cat1
+  - {object: safe, condition: B}  # cat3

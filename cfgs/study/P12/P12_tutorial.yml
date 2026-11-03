@@ -1,11 +1,9 @@
 # Tutorial for P12: `scripts/run_tutorial.sh P12`, before `scripts/run_study.sh P12`. Skip ▸▸ (top right) drops a trial.
-# One object per category, none of P12's test objects; each object A (manual) then B (suggestion). Design: cfgs/study/DESIGN.md.
+# One object from each of P12's two test categories, none of P12's test objects; each object A (manual) then B (suggestion).
 participant: P12_tutorial
 objects_from: cfgs/dev/batch_set_cfg.yml
 trials:
-  - {object: trashcan, condition: A}
-  - {object: trashcan, condition: B}
-  - {object: refrigerator, condition: A}
-  - {object: refrigerator, condition: B}
-  - {object: safe, condition: A}
-  - {object: safe, condition: B}
+  - {object: trashcan, condition: A}  # cat1
+  - {object: trashcan, condition: B}  # cat1
+  - {object: refrigerator, condition: A}  # cat2
+  - {object: refrigerator, condition: B}  # cat2

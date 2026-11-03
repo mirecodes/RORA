@@ -1,11 +1,9 @@
 # Tutorial for P08: `scripts/run_tutorial.sh P08`, before `scripts/run_study.sh P08`. Skip ▸▸ (top right) drops a trial.
-# One object per category, none of P08's test objects; each object A (manual) then B (suggestion). Design: cfgs/study/DESIGN.md.
+# One object from each of P08's two test categories, none of P08's test objects; each object A (manual) then B (suggestion).
 participant: P08_tutorial
 objects_from: cfgs/dev/batch_set_cfg.yml
 trials:
-  - {object: globe, condition: A}
-  - {object: globe, condition: B}
-  - {object: folding_chair, condition: A}
-  - {object: folding_chair, condition: B}
-  - {object: lamp, condition: A}
-  - {object: lamp, condition: B}
+  - {object: globe, condition: A}  # cat1
+  - {object: globe, condition: B}  # cat1
+  - {object: folding_chair, condition: A}  # cat2
+  - {object: folding_chair, condition: B}  # cat2

@@ -1,11 +1,9 @@
 # Tutorial for P07: `scripts/run_tutorial.sh P07`, before `scripts/run_study.sh P07`. Skip ▸▸ (top right) drops a trial.
-# One object per category, none of P07's test objects; each object A (manual) then B (suggestion). Design: cfgs/study/DESIGN.md.
+# One object from each of P07's two test categories, none of P07's test objects; each object A (manual) then B (suggestion).
 participant: P07_tutorial
 objects_from: cfgs/dev/batch_set_cfg.yml
 trials:
-  - {object: fan, condition: A}
-  - {object: fan, condition: B}
-  - {object: box, condition: A}
-  - {object: box, condition: B}
-  - {object: lamp, condition: A}
-  - {object: lamp, condition: B}
+  - {object: fan, condition: A}  # cat1
+  - {object: fan, condition: B}  # cat1
+  - {object: box, condition: A}  # cat2
+  - {object: box, condition: B}  # cat2
