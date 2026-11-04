@@ -9,6 +9,7 @@ from functions.math.geometry import normalize
 
 URDF_TYPES = {"rev": "revolute", "pri": "prismatic", "pla": "planar", "sph": "floating"}
 INERTIA_KEYS = {"ixx": (0, 0), "ixy": (0, 1), "ixz": (0, 2), "iyy": (1, 1), "iyz": (1, 2), "izz": (2, 2)}
+REVOLUTE_LIMIT = f"{2 * np.pi:.9g}"  # +/-360 deg in radians
 
 
 def _xyz(v) -> str:
@@ -23,6 +24,12 @@ def _apply(T, p) -> np.ndarray:
         return p
     q = T @ np.append(p, 1.0)
     return q[:3] / q[3]
+
+
+def _bbox_diagonal(meshes: dict[int, trimesh.Trimesh]) -> float:
+    """Bounding box diagonal of all meshes together: the whole object's scale."""
+    b = np.array([m.bounds for m in meshes.values()])
+    return float(np.linalg.norm(b[:, 1].max(axis=0) - b[:, 0].min(axis=0)))
 
 
 def urdf_transform(cfgs, states) -> np.ndarray | None:
@@ -201,7 +208,8 @@ def generate_urdf(closed_parts: dict[int, trimesh.Trimesh],
                 axis = normalize(T[:3, :3] @ axis)
             ET.SubElement(j_el, "axis", xyz=_xyz(axis))
         if urdf_type in ("revolute", "prismatic"):
-            ET.SubElement(j_el, "limit", lower="-1.57", upper="1.57", effort="10.0", velocity="1.0")
+            lim = REVOLUTE_LIMIT if urdf_type == "revolute" else f"{_bbox_diagonal(meshes):.9g}"
+            ET.SubElement(j_el, "limit", lower=f"-{lim}", upper=lim, effort="10.0", velocity="1.0")
 
     for k, s in enumerate(suggestions):
         a, b = s["pair"]
@@ -212,7 +220,7 @@ def generate_urdf(closed_parts: dict[int, trimesh.Trimesh],
         ET.SubElement(j_el, "child", link=f"{name}_axis")
         ET.SubElement(j_el, "origin", xyz=_xyz(_apply(T, s["origin"]) - link_o(a)), rpy="0 0 0")
         ET.SubElement(j_el, "axis", xyz=_xyz(normalize(s["n"] if T is None else T[:3, :3] @ s["n"])))
-        ET.SubElement(j_el, "limit", lower="-1.57", upper="1.57", effort="10.0", velocity="1.0")
+        ET.SubElement(j_el, "limit", lower=f"-{REVOLUTE_LIMIT}", upper=REVOLUTE_LIMIT, effort="10.0", velocity="1.0")
 
     # Fix the tree root and every unreached link to base
     if link_ids:

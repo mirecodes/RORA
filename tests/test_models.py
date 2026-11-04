@@ -1,6 +1,12 @@
+import tempfile
+import xml.etree.ElementTree as ET
+
+import numpy as np
+import trimesh
+
 from functions.gui.models import (ManualJoints, PartAssignment, cycle_state, group_fragments, group_pairs,
                                   valid_vectors)
-from functions.utils.urdf import joints_from_bicons
+from functions.utils.urdf import generate_urdf, joints_from_bicons
 
 
 def test_part_assignment():
@@ -108,6 +114,22 @@ def test_manual_joints_two_arrows_merge_like_suggestions():
     cycle_state(m.triad[1], m.counter)
     assert m.confirm()
     assert [j["type"] for j in joints_from_bicons(m.bicons())] == ["Spherical"]
+
+
+def test_generate_urdf_joint_limits():
+    parts = {0: trimesh.creation.box(), 1: trimesh.creation.box(), 2: trimesh.creation.box()}
+    parts[2].apply_translation([3, 0, 0])           # union bbox 4 x 1 x 1
+    axis = {"origin": [0, 0, 0], "n": [0, 0, 1]}
+    joints = [{"parent": 0, "child": 1, "type": "revolute", "axis": axis},
+              {"parent": 1, "child": 2, "type": "prismatic", "axis": axis}]
+    with tempfile.TemporaryDirectory() as out_dir:
+        path = generate_urdf(parts, joints, out_dir=out_dir, transform_matrix=np.diag([2.0, 2.0, 2.0, 1.0]),
+                             suggestions=[{"pair": (0, 1), "origin": [0, 0, 0], "n": [1, 0, 0]}])
+        limits = {j.get("name"): j.find("limit") for j in ET.parse(path).getroot().findall("joint")}
+    for name, expected in (("joint_0_1", 2 * np.pi), ("suggest_0_1_0", 2 * np.pi),
+                           ("joint_1_2", 2 * np.sqrt(18))):      # prismatic: diagonal after the transform
+        assert np.isclose(float(limits[name].get("upper")), expected)
+        assert np.isclose(float(limits[name].get("lower")), -expected)
 
 
 if __name__ == "__main__":

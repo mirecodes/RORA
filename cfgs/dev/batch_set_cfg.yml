@@ -5,6 +5,9 @@ defaults:
   extension: ply
   profile: partnet_object
 
+start_stage: articulate
+
+
 objects:
   cat1: 
     bucket: {parts: 2, object_profile: bucket_20261029_015825}
